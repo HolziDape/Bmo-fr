@@ -1,0 +1,6 @@
+hubert_base.pt
+rmvpe.pt
+*.pth
+*.index
+__pycache__/
+.spotify_cache
