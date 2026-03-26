@@ -86,22 +86,6 @@ Oder einfach `bmo_start.bat` doppelklicken.
 
 ---
 
-## 🎙️ Eigenes Wake-Word trainieren
-
-Das Wake-Word "Hey BMO" wird mit Windows TTS automatisch generiert und trainiert:
-
-```bash
-python train_wakeword.py
-```
-
-Das Skript:
-1. Generiert 500 Positiv-Beispiele ("Hey BMO" in verschiedenen Variationen)
-2. Generiert 1000 Negativ-Beispiele (andere Phrasen)
-3. Trainiert ein GRU-Netz auf openWakeWord-Embeddings
-4. Exportiert `models/hey_bmo.onnx`
-
----
-
 ## ⚙️ Konfiguration
 
 In `bmo_desktop.py` oben:
