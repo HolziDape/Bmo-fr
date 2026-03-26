@@ -49,20 +49,23 @@ else:
 
 CORE_URL        = "http://localhost:6000"
 
-WAKE_WORD_MODEL = "wakeword.onnx"
+WAKE_WORD_MODEL = "hey_bmo.onnx"
+
+VOICE_VOLUME    = 0.2   # Lautstärke der BMO-Stimme (0.0 = stumm, 1.0 = max)
+SOUNDS_VOLUME   = 0.2   # Lautstärke der vorgenerierten Sound-Lines
 
 # ┌─────────────────────────────────────────────────────────────────┐
 # │  WAKE-WORD EINSTELLUNGEN                                        │
-# │  WAKE_THRESHOLD:    0.5 = empfindlicher, 0.7 = strenger        │
-# │  WAKE_VOTES_NEEDED: 1 = sofort, 2 = empfohlen, 3 = sehr sicher │
+# │  WAKE_THRESHOLD:    0.5 = empfindlicher, 0.7 = strenger         │
+# │  WAKE_VOTES_NEEDED: 1 = sofort, 2 = empfohlen, 3 = sehr sicher  │
 # └─────────────────────────────────────────────────────────────────┘
 WAKE_THRESHOLD    = 0.5
 WAKE_VOTES_NEEDED = 1
 
 # ┌─────────────────────────────────────────────────────────────────┐
 # │  AUFNAHME EINSTELLUNGEN                                         │
-# │  LISTEN_TIMEOUT:  Sekunden warten auf ersten Ton               │
-# │  PAUSE_THRESHOLD: Sekunden Stille = Satz zu Ende               │
+# │  LISTEN_TIMEOUT:  Sekunden warten auf ersten Ton                │
+# │  PAUSE_THRESHOLD: Sekunden Stille = Satz zu Ende                │
 # └─────────────────────────────────────────────────────────────────┘
 LISTEN_TIMEOUT  = 4
 PAUSE_THRESHOLD = 1.5
@@ -255,7 +258,7 @@ def play_random_sound(directory, wait=False):
     pygame.mixer.music.unload()
     wahl = random.choice(sounds)
     pygame.mixer.music.load(wahl)
-    pygame.mixer.music.set_volume(0.3)
+    pygame.mixer.music.set_volume(SOUNDS_VOLUME)
     pygame.mixer.music.play()
     if wait:
         while pygame.mixer.music.get_busy():
@@ -286,6 +289,7 @@ def speak_bmo(text, audio_b64=None):
 
         CURRENT_STATE = "SPEAK"
         pygame.mixer.music.load(tmp_path)
+        pygame.mixer.music.set_volume(VOICE_VOLUME)
         pygame.mixer.music.play()
         while pygame.mixer.music.get_busy():
             time.sleep(0.1)

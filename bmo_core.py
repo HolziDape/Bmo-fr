@@ -415,11 +415,13 @@ def do_jumpscare():
 
 # ── KERNFUNKTION: Text → Antwort ───────────────────────────────────────────
 
-def process_text(text: str) -> tuple:
+def process_text(text: str, remote: bool = False) -> tuple:
     """
-    Schickt Text an Ollama, erkennt Aktionen, gibt (antwort, action) zurück.
-    FIX: Gibt jetzt immer ein Tupel (response_text, action_or_None) zurück,
-         damit Desktop und Web auf Aktionen reagieren können.
+    Schickt Text an Ollama, erkennt Aktionen, gibt (antwort, action, action_params) zurück.
+
+    remote=False (Standard): Aktionen werden lokal ausgeführt (für dich).
+    remote=True:  Aktionen werden NICHT ausgeführt – der Client macht das selbst.
+                  Wird für Freunde genutzt, die ihren eigenen PC/Spotify haben.
     """
     try:
         response = ollama.chat(model=OLLAMA_MODEL, messages=[
@@ -428,7 +430,7 @@ def process_text(text: str) -> tuple:
         ])
         content = response['message']['content']
     except Exception as e:
-        return f"Ollama ist gerade nicht erreichbar: {e}", None
+        return f"Ollama ist gerade nicht erreichbar: {e}", None, {}
 
     if "{" in content and "action" in content:
         try:
@@ -437,51 +439,70 @@ def process_text(text: str) -> tuple:
             data   = json.loads(content[start:end])
             action = data.get("action", "")
 
+            # Informations-Aktionen: immer lokal ausführen (nur Text, kein lokaler Eingriff)
             if action == "get_time":
-                return f"Es ist jetzt {datetime.datetime.now().strftime('%H:%M')} Uhr.", action
+                return f"Es ist jetzt {datetime.datetime.now().strftime('%H:%M')} Uhr.", action, {}
             elif action == "get_joke":
-                return random.choice(WITZE), action
+                return random.choice(WITZE), action, {}
             elif action == "get_news":
-                return get_news(), action
+                return get_news(), action, {}
             elif action == "get_status":
                 cpu = psutil.cpu_percent()
                 ram = psutil.virtual_memory().percent
-                return f"CPU: {cpu}%, RAM: {ram}%. Alles läuft gut!", action
+                return f"CPU: {cpu}%, RAM: {ram}%. Alles läuft gut!", action, {}
             elif action == "get_weather":
                 city = data.get("location", "Berlin")
-                return f"In {city} ist es aktuell {get_weather(city)}.", action
+                return f"In {city} ist es aktuell {get_weather(city)}.", action, {}
+
+            # Ausführungs-Aktionen: bei remote=True nur zurückgeben, nicht ausführen
             elif action == "shutdown_pc":
-                threading.Thread(target=shutdown_pc, daemon=True).start()
-                return "Okay, ich fahre jetzt herunter. Tschüss!", action
+                if not remote:
+                    threading.Thread(target=shutdown_pc, daemon=True).start()
+                return "Okay, ich fahre jetzt herunter. Tschüss!", action, {}
             elif action == "spotify_play":
-                return spotify_play(data.get("query", "")), action
+                if not remote:
+                    return spotify_play(data.get("query", "")), action, {}
+                return "Ich starte die Musik!", action, {"query": data.get("query", "")}
             elif action == "spotify_pause":
-                return spotify_pause(), action
+                if not remote:
+                    return spotify_pause(), action, {}
+                return "Musik pausiert.", action, {}
             elif action == "spotify_resume":
-                return spotify_resume(), action
+                if not remote:
+                    return spotify_resume(), action, {}
+                return "Musik läuft weiter.", action, {}
             elif action == "spotify_next":
-                return spotify_next(), action
+                if not remote:
+                    return spotify_next(), action, {}
+                return "Nächstes Lied!", action, {}
             elif action == "spotify_playlist":
-                return spotify_playlist(), action
+                if not remote:
+                    return spotify_playlist(), action, {}
+                return "Deine Playlist läuft!", action, {}
             elif action == "spotify_volume":
-                return spotify_volume(data.get("level", 50)), action
+                if not remote:
+                    return spotify_volume(data.get("level", 50)), action, {}
+                return f"Lautstärke angepasst.", action, {"level": data.get("level", 50)}
         except json.JSONDecodeError:
             pass
 
-    return content, None
+    return content, None, {}
 
 # ── ROUTES ─────────────────────────────────────────────────────────────────
 
 @app.route('/process', methods=['POST'])
 def route_process():
-    """Hauptendpunkt: Text rein → Antwort + action raus."""
-    data = request.json or {}
-    # FIX: akzeptiert sowohl "message" als auch "text" als Key
-    text = (data.get('message') or data.get('text') or '').strip()
+    """Hauptendpunkt: Text rein → Antwort + action raus.
+    Optional: {"remote": true} → Aktionen werden nicht lokal ausgeführt,
+    sondern als action + action_params zurückgegeben (für Freund-Clients).
+    """
+    data   = request.json or {}
+    text   = (data.get('message') or data.get('text') or '').strip()
+    remote = bool(data.get('remote', False))
     if not text:
-        return jsonify(response="Ich habe nichts verstanden.", action=None)
-    response, action = process_text(text)
-    return jsonify(response=response, action=action)
+        return jsonify(response="Ich habe nichts verstanden.", action=None, action_params={})
+    response, action, action_params = process_text(text, remote=remote)
+    return jsonify(response=response, action=action, action_params=action_params)
 
 
 @app.route('/transcribe', methods=['POST'])
@@ -525,10 +546,11 @@ def route_transcribe():
         except: pass
 
     if not transcript:
-        return jsonify(transcript='', response='Ich habe dich nicht verstanden.', action=None)
+        return jsonify(transcript='', response='Ich habe dich nicht verstanden.', action=None, action_params={})
 
-    response, action = process_text(transcript)
-    return jsonify(transcript=transcript, response=response, action=action)
+    remote = bool((request.json or {}).get('remote', False))
+    response, action, action_params = process_text(transcript, remote=remote)
+    return jsonify(transcript=transcript, response=response, action=action, action_params=action_params)
 
 
 @app.route('/speak', methods=['POST'])

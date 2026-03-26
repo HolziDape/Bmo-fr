@@ -1,29 +1,46 @@
 """
-BMO Wakeword Trainer
-====================
-Generiert synthetische "Hey BMO" Trainingsdaten und trainiert ein .onnx Modell.
-Einfach starten mit: python train_wakeword.py
+BMO Wakeword Trainer — openWakeWord-kompatibel
+===============================================
+Trainiert ein "Hey BMO" Modell das direkt mit openWakeWord funktioniert.
+Verwendung: python train_wakeword.py
+
+Warum dieser Ansatz?
+  openWakeWord erwartet ONNX-Modelle die auf seinen internen Embeddings
+  arbeiten — nicht auf rohen Mel-Spektrogrammen. Dieser Trainer nutzt
+  genau diese Embeddings als Features.
+
+  Pipeline:
+    Audio → openWakeWord Embedding-Modell → [N, 96] → Fenster [16, 96]
+          → GRU-Klassifikator → Score (0–1)
 """
 
 import os
-import json
 import random
+import subprocess
 import numpy as np
 import torch
+import torch.nn as nn
+from pathlib import Path
 from scipy.io import wavfile
 from scipy.signal import resample
-from pathlib import Path
 
-# ── KONFIGURATION ──────────────────────────────────────────────────────────────
-WAKEWORD        = "Hey BMO"
-OUTPUT_MODEL    = "hey_bmo.onnx"
-SAMPLE_RATE     = 16000
-N_SAMPLES       = 500       # Anzahl synthetischer Positiv-Beispiele
-N_NEG_SAMPLES   = 1000      # Anzahl Negativ-Beispiele (anderer Text)
-TRAIN_DIR       = "wakeword_training"
-# ──────────────────────────────────────────────────────────────────────────────
+# Alle Pfade relativ zum Skript-Ordner (unabhängig vom Arbeitsverzeichnis)
+SCRIPT_DIR = Path(__file__).parent.resolve()
+os.chdir(SCRIPT_DIR)
 
-# Negative Beispiele — Sätze die NICHT das Wakeword sind
+# ── KONFIGURATION ────────────────────────────────────────────────────────────
+WAKEWORD      = "Hey BMO"
+OUTPUT_MODEL  = str(SCRIPT_DIR / "hey_bmo.onnx")
+SAMPLE_RATE   = 16000
+N_SAMPLES     = 500       # Positiv-Beispiele
+N_NEG_SAMPLES = 1000      # Negativ-Beispiele
+TRAIN_DIR     = str(SCRIPT_DIR / "wakeword_training")
+N_CONTEXT     = 16        # Embedding-Fenster (openWakeWord Standard: 16 × 80ms = 1.28s)
+N_FEATURES    = 96        # Embedding-Dimension (openWakeWord Standard)
+EPOCHS        = 100
+BATCH_SIZE    = 64
+# ─────────────────────────────────────────────────────────────────────────────
+
 NEGATIVE_PHRASES = [
     "Guten Morgen", "Wie geht es dir", "Was ist das Wetter",
     "Spiel Musik ab", "Wie spät ist es", "Hallo wie geht es",
@@ -35,18 +52,31 @@ NEGATIVE_PHRASES = [
     "Hallo Computer", "Guten Tag", "Tschüss",
     "Kannst du mir helfen", "Ich habe eine Frage",
     "Was ist die Zeit", "Wie warm ist es draußen",
+    "Bitte hilf mir", "Kannst du das machen",
+    "Was machst du gerade", "Erzähl mir mehr",
+    "Ich verstehe das nicht", "Kannst du wiederholen",
 ]
+
+WAKEWORD_VARIATIONS = [
+    "Hey BMO",
+    "Hey B M O",
+    "Hey Bimo",
+    "Hey Bi Mo",
+    "Hey BMO!",
+    "Hey BMO, hörst du mich",
+    "Hey BMO kannst du mir helfen",
+    "Hey BMO bitte",
+]
+
 
 def setup_dirs():
     os.makedirs(f"{TRAIN_DIR}/positive", exist_ok=True)
     os.makedirs(f"{TRAIN_DIR}/negative", exist_ok=True)
     print(f"✓ Ordner erstellt: {TRAIN_DIR}/")
 
+
 def generate_audio_tts(text, filepath, voice_variation=0):
     """Generiert Audio mit Windows TTS (kein Internet nötig)."""
-    import subprocess
-
-    # Absoluten Pfad sicherstellen
     filepath_abs = os.path.abspath(filepath)
     filepath_ps  = filepath_abs.replace("\\", "\\\\")
 
@@ -69,312 +99,281 @@ $synth.SetOutputToWaveFile('{filepath_ps}')
 $synth.Speak('{text}')
 $synth.Dispose()
 """
-    subprocess.run(
-        ["powershell", "-Command", ps_script],
-        capture_output=True, timeout=15
-    )
+    subprocess.run(["powershell", "-Command", ps_script], capture_output=True, timeout=15)
     return os.path.exists(filepath_abs)
 
-def add_noise(waveform, noise_level=0.005):
-    """Fügt leichtes Rauschen hinzu."""
-    noise = torch.randn_like(waveform) * noise_level
-    return waveform + noise
-
-def change_speed(waveform, sr, factor):
-    """Ändert die Geschwindigkeit."""
-    effects = [["rate", str(int(sr * factor))]]
-    try:
-        waveform, _ = torchaudio.sox_effects.apply_effects_tensor(waveform, sr, effects)
-    except:
-        pass
-    return waveform
 
 def generate_training_data():
     print(f"\n{'='*50}")
     print(f"  Generiere Trainingsdaten für: '{WAKEWORD}'")
     print(f"{'='*50}\n")
 
-    # ── POSITIV-BEISPIELE ────────────────────────────────────────────
     print(f"[1/3] Generiere {N_SAMPLES} Positiv-Beispiele...")
     success = 0
-
-    # Variationen des Wakewords
-    variations = [
-        "Hey BMO",
-        "Hey B M O",
-        "Hey Bimo",   # häufige Aussprache
-        "Hey Bi Mo",
-        "Hey BMO!",
-    ]
-
     for i in range(N_SAMPLES):
-        text     = random.choice(variations)
+        text     = random.choice(WAKEWORD_VARIATIONS)
         filepath = f"{TRAIN_DIR}/positive/pos_{i:04d}.wav"
-        voice_v  = i % 4
-
-        if generate_audio_tts(text, filepath, voice_v):
+        if generate_audio_tts(text, filepath, i % 4):
             success += 1
-
         if (i + 1) % 50 == 0:
             print(f"  → {i+1}/{N_SAMPLES} ({success} erfolgreich)")
-
     print(f"  ✓ {success} Positiv-Beispiele generiert")
 
-    # ── NEGATIV-BEISPIELE ────────────────────────────────────────────
     print(f"\n[2/3] Generiere {N_NEG_SAMPLES} Negativ-Beispiele...")
     neg_success = 0
-
     for i in range(N_NEG_SAMPLES):
         text     = random.choice(NEGATIVE_PHRASES)
         filepath = f"{TRAIN_DIR}/negative/neg_{i:04d}.wav"
-        voice_v  = i % 4
-
-        if generate_audio_tts(text, filepath, voice_v):
+        if generate_audio_tts(text, filepath, i % 4):
             neg_success += 1
-
         if (i + 1) % 100 == 0:
             print(f"  → {i+1}/{N_NEG_SAMPLES} ({neg_success} erfolgreich)")
-
     print(f"  ✓ {neg_success} Negativ-Beispiele generiert")
     return success, neg_success
 
-def extract_features(wav_path, n_mels=40):
-    """Extrahiert Mel-Spektrogramm Features mit scipy statt torchaudio."""
-    try:
-        sr, wav = wavfile.read(wav_path)
 
-        # Stereo → Mono
-        if len(wav.shape) > 1:
-            wav = wav.mean(axis=1)
+def load_audio_padded(wav_path, min_seconds=2.5):
+    """
+    Lädt WAV als float32 bei 16kHz.
+    Padded mit Stille am Anfang damit mindestens N_CONTEXT Embedding-Frames
+    entstehen (openWakeWord braucht ~80ms pro Frame).
+    """
+    sr, wav = wavfile.read(str(wav_path))
+    if len(wav.shape) > 1:
+        wav = wav.mean(axis=1)
+    wav = wav.astype(np.float32)
+    if wav.max() > 1.0:
+        wav = wav / 32768.0
+    if sr != SAMPLE_RATE:
+        target_len = int(len(wav) * SAMPLE_RATE / sr)
+        wav = resample(wav, target_len)
 
-        # Int → Float
-        wav = wav.astype(np.float32)
-        if wav.dtype == np.float32 and wav.max() > 1.0:
-            wav = wav / 32768.0
+    # Sicherstellen dass genug Audio für mindestens N_CONTEXT Frames vorhanden ist
+    min_samples = int(min_seconds * SAMPLE_RATE)
+    if len(wav) < min_samples:
+        pad = np.zeros(min_samples - len(wav), dtype=np.float32)
+        wav = np.concatenate([pad, wav])  # Stille VOR dem Wakeword
 
-        # Resample auf 16000 Hz
-        if sr != SAMPLE_RATE:
-            target_len = int(len(wav) * SAMPLE_RATE / sr)
-            wav = resample(wav, target_len)
+    return wav
 
-        # Mel-Spektrogramm manuell berechnen
-        n_fft    = 512
-        hop      = 160
-        frames   = []
-        window   = np.hanning(n_fft)
 
-        for i in range(0, max(1, len(wav) - n_fft), hop):
-            frame = wav[i:i+n_fft]
-            if len(frame) < n_fft:
-                frame = np.pad(frame, (0, n_fft - len(frame)))
-            spectrum = np.abs(np.fft.rfft(frame * window))
-            frames.append(spectrum)
+def load_clips_as_int16(wav_files, clip_samples):
+    """
+    Lädt eine Liste von WAV-Dateien als int16-Array [n_clips, clip_samples].
+    Kürzere Clips werden am Anfang mit Stille aufgefüllt (Wakeword am Ende).
+    """
+    clips = []
+    failed = 0
+    for wav_path in wav_files:
+        try:
+            sr, wav = wavfile.read(str(wav_path))
+            if len(wav.shape) > 1:
+                wav = wav.mean(axis=1).astype(np.int16)
+            if wav.dtype != np.int16:
+                wav = (wav.astype(np.float32) / 32768.0 * 32767).astype(np.int16)
+            if sr != SAMPLE_RATE:
+                wav_f = wav.astype(np.float32)
+                wav_f = resample(wav_f, int(len(wav_f) * SAMPLE_RATE / sr))
+                wav = wav_f.astype(np.int16)
+            # Auf clip_samples bringen (Stille vorne)
+            if len(wav) < clip_samples:
+                pad = np.zeros(clip_samples - len(wav), dtype=np.int16)
+                wav = np.concatenate([pad, wav])
+            else:
+                wav = wav[:clip_samples]
+            clips.append(wav)
+        except Exception:
+            failed += 1
+    if failed:
+        print(f"    [WARN] {failed} Dateien konnten nicht geladen werden")
+    return np.array(clips, dtype=np.int16) if clips else None
 
-        if not frames:
-            return None
 
-        spec = np.array(frames).T  # [freq, time]
+class WakeWordClassifier(nn.Module):
+    """
+    GRU-Klassifikator der openWakeWord-Embeddings verarbeitet.
 
-        # Mel-Filterbank
-        freqs    = np.fft.rfftfreq(n_fft, 1.0/SAMPLE_RATE)
-        mel_min  = 2595 * np.log10(1 + 20/700)
-        mel_max  = 2595 * np.log10(1 + (SAMPLE_RATE/2)/700)
-        mel_pts  = np.linspace(mel_min, mel_max, n_mels + 2)
-        hz_pts   = 700 * (10**(mel_pts/2595) - 1)
-        bin_pts  = np.floor((n_fft+1) * hz_pts / SAMPLE_RATE).astype(int)
-
-        fbank = np.zeros((n_mels, spec.shape[0]))
-        for m in range(1, n_mels+1):
-            f_m_minus = bin_pts[m-1]
-            f_m       = bin_pts[m]
-            f_m_plus  = bin_pts[m+1]
-            for k in range(f_m_minus, f_m):
-                if f_m != f_m_minus:
-                    fbank[m-1, k] = (k - f_m_minus) / (f_m - f_m_minus)
-            for k in range(f_m, f_m_plus):
-                if f_m_plus != f_m:
-                    fbank[m-1, k] = (f_m_plus - k) / (f_m_plus - f_m)
-
-        mel_spec = np.dot(fbank, spec)
-        mel_spec = 10 * np.log10(mel_spec + 1e-10)  # dB
-
-        # Auf feste Länge bringen (300 Frames)
-        target_len = 300
-        if mel_spec.shape[1] < target_len:
-            mel_spec = np.pad(mel_spec, ((0,0),(0, target_len - mel_spec.shape[1])))
-        else:
-            mel_spec = mel_spec[:, :target_len]
-
-        return torch.tensor(mel_spec, dtype=torch.float32)
-
-    except Exception as e:
-        print(f"  [WARN] Feature-Fehler bei {wav_path}: {e}")
-        return None
-
-class WakeWordModel(torch.nn.Module):
-    def __init__(self, n_mels=40):
+    Input:  [batch, 16, 96]  — 16 Embedding-Frames à 96 Dimensionen
+    Output: [batch, 1]       — Wakeword-Wahrscheinlichkeit (0–1)
+    """
+    def __init__(self, n_context=N_CONTEXT, n_features=N_FEATURES):
         super().__init__()
-        self.conv = torch.nn.Sequential(
-            torch.nn.Conv2d(1, 32, kernel_size=3, padding=1),
-            torch.nn.ReLU(),
-            torch.nn.MaxPool2d(2),
-            torch.nn.Conv2d(32, 64, kernel_size=3, padding=1),
-            torch.nn.ReLU(),
-            torch.nn.MaxPool2d(2),
-            torch.nn.Conv2d(64, 128, kernel_size=3, padding=1),
-            torch.nn.ReLU(),
-            torch.nn.MaxPool2d(2),
+        self.gru = nn.GRU(
+            n_features, 64, num_layers=2,
+            batch_first=True, dropout=0.2
         )
-        # Größe automatisch berechnen
-        dummy = torch.zeros(1, 1, n_mels, 300)
-        conv_out = self.conv(dummy)
-        flat_size = conv_out.view(1, -1).shape[1]
-
-        self.fc = torch.nn.Sequential(
-            torch.nn.Flatten(),
-            torch.nn.Linear(flat_size, 256),
-            torch.nn.ReLU(),
-            torch.nn.Dropout(0.3),
-            torch.nn.Linear(256, 1),
-            torch.nn.Sigmoid()
+        self.fc = nn.Sequential(
+            nn.Linear(64, 32),
+            nn.ReLU(),
+            nn.Dropout(0.3),
+            nn.Linear(32, 1),
+            nn.Sigmoid(),
         )
 
     def forward(self, x):
-        x = x.unsqueeze(1)
-        x = self.conv(x)
-        return self.fc(x)
+        # x: [batch, n_context, n_features]
+        _, h = self.gru(x)   # h: [num_layers, batch, 64]
+        return self.fc(h[-1])  # letzter Layer → [batch, 1]
 
-    def forward(self, x):
-        x = x.unsqueeze(1)  # [B, 1, n_mels, time]
-        x = self.conv(x)
-        return self.fc(x)
 
 def train_model():
-    print(f"\n[3/3] Lade Features und trainiere Modell...")
+    print(f"\n[3/3] Extrahiere Embeddings und trainiere Modell...")
 
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
     if str(device) == "cpu":
-        print("  ⚠️  Kein CUDA gefunden — Training läuft auf CPU (dauert länger)")
+        print("  ⚠️  Kein CUDA — Training auf CPU (dauert länger)")
     else:
-        print(f"  ✓ GPU erkannt: {torch.cuda.get_device_name(0)}")
+        print(f"  ✓ GPU: {torch.cuda.get_device_name(0)}")
 
-    # Features laden
-    X, y = [], []
+    # openWakeWord AudioFeatures laden
+    print("  Lade openWakeWord Embedding-Modell...")
+    try:
+        from openwakeword.utils import AudioFeatures
+        af = AudioFeatures()
+        # Testlauf: [1, samples] int16 → [1, 16, 96]
+        test = af.embed_clips(np.zeros((1, SAMPLE_RATE * 2), dtype=np.int16))
+        assert test.shape == (1, N_CONTEXT, N_FEATURES), f"Unerwartete Form: {test.shape}"
+        print("  ✓ Embedding-Modell geladen")
+    except ImportError:
+        print("❌ openwakeword nicht installiert!")
+        print("   Bitte installieren mit: pip install openwakeword")
+        return
+    except Exception as e:
+        print(f"❌ Embedding-Modell-Fehler: {e}")
+        return
 
     pos_files = list(Path(f"{TRAIN_DIR}/positive").glob("*.wav"))
     neg_files = list(Path(f"{TRAIN_DIR}/negative").glob("*.wav"))
+    print(f"  Positiv: {len(pos_files)} | Negativ: {len(neg_files)} Dateien\n")
 
-    print(f"  Positiv: {len(pos_files)} Dateien")
-    print(f"  Negativ: {len(neg_files)} Dateien")
+    # Alle Clips auf 2 Sekunden normieren (= 32000 Samples bei 16kHz)
+    CLIP_SAMPLES = SAMPLE_RATE * 2
 
-    for f in pos_files:
-        feat = extract_features(str(f))
-        if feat is not None:
-            X.append(feat)
-            y.append(1.0)
+    # Clips laden und Embeddings in Batches extrahieren
+    BATCH = 64
 
-    for f in neg_files:
-        feat = extract_features(str(f))
-        if feat is not None:
-            X.append(feat)
-            y.append(0.0)
+    def embed_files(files, label):
+        all_emb = []
+        for i in range(0, len(files), BATCH):
+            batch_files = files[i:i+BATCH]
+            clips = load_clips_as_int16(batch_files, CLIP_SAMPLES)
+            if clips is None:
+                continue
+            emb = af.embed_clips(clips)  # [n, 16, 96]
+            all_emb.append(emb)
+            if (i + BATCH) % 200 == 0 or i + BATCH >= len(files):
+                print(f"    → {min(i+BATCH, len(files))}/{len(files)} verarbeitet")
+        return np.concatenate(all_emb, axis=0) if all_emb else np.empty((0, N_CONTEXT, N_FEATURES))
 
-    if len(X) < 10:
-        print("❌ Zu wenig Trainingsdaten! Bitte zuerst generate_training_data() ausführen.")
+    print("  Extrahiere positive Embeddings...")
+    X_pos = embed_files(pos_files, 1)
+    print(f"  → {len(X_pos)} positive Samples")
+
+    print("  Extrahiere negative Embeddings...")
+    X_neg = embed_files(neg_files, 0)
+    print(f"  → {len(X_neg)} negative Samples")
+
+    if len(X_pos) < 10 or len(X_neg) < 10:
+        print("❌ Zu wenig Daten nach Embedding-Extraktion!")
         return
 
-    X = torch.stack(X)
+    # Klassen balancieren: max 3× so viele Negative wie Positive
+    max_neg = min(len(X_neg), len(X_pos) * 3)
+    idx_neg = np.random.choice(len(X_neg), max_neg, replace=False)
+    X_neg   = X_neg[idx_neg]
+    print(f"  Balanciert: {len(X_pos)} pos / {len(X_neg)} neg")
+
+    X = np.concatenate([X_pos, X_neg], axis=0).astype(np.float32)
+    y = np.array([1.0] * len(X_pos) + [0.0] * len(X_neg), dtype=np.float32)
+
+    perm = np.random.permutation(len(X))
+    X, y = X[perm], y[perm]
+
+    X = torch.tensor(X)
     y = torch.tensor(y).unsqueeze(1)
 
-    # Shuffle
-    idx = torch.randperm(len(X))
-    X, y = X[idx], y[idx]
+    split   = int(0.8 * len(X))
+    X_train = X[:split].to(device)
+    y_train = y[:split].to(device)
+    X_val   = X[split:].to(device)
+    y_val   = y[split:].to(device)
 
-    # Train/Val Split
-    split    = int(0.8 * len(X))
-    X_train  = X[:split].to(device)
-    y_train  = y[:split].to(device)
-    X_val    = X[split:].to(device)
-    y_val    = y[split:].to(device)
+    model     = WakeWordClassifier().to(device)
+    optimizer = torch.optim.Adam(model.parameters(), lr=1e-3, weight_decay=1e-4)
+    scheduler = torch.optim.lr_scheduler.ReduceLROnPlateau(optimizer, patience=10, factor=0.5)
+    criterion = nn.BCELoss()
 
-    model     = WakeWordModel().to(device)
-    optimizer = torch.optim.Adam(model.parameters(), lr=0.0001, weight_decay=1e-4)
-    scheduler = torch.optim.lr_scheduler.ReduceLROnPlateau(optimizer, patience=5, factor=0.5)
-    criterion = torch.nn.BCELoss()
+    print(f"\n  Training: {split} Train, {len(X)-split} Val, {EPOCHS} Epochen")
+    best_val = float("inf")
 
-    print(f"\n  Training startet ({split} Train, {len(X)-split} Val)...")
-    best_val  = float('inf')
-
-    for epoch in range(50):
+    for epoch in range(EPOCHS):
         model.train()
-        # Mini-batches
-        batch_size = 32
         losses = []
-        for i in range(0, len(X_train), batch_size):
-            xb = X_train[i:i+batch_size]
-            yb = y_train[i:i+batch_size]
+        perm_e = torch.randperm(len(X_train))
+        for i in range(0, len(X_train), BATCH_SIZE):
+            idx  = perm_e[i:i+BATCH_SIZE]
+            xb, yb = X_train[idx], y_train[idx]
             optimizer.zero_grad()
-            pred = model(xb)
-            loss = criterion(pred, yb)
+            loss = criterion(model(xb), yb)
             loss.backward()
             optimizer.step()
             losses.append(loss.item())
 
-        # Validation
         model.eval()
         with torch.no_grad():
             val_pred = model(X_val)
             val_loss = criterion(val_pred, y_val).item()
             val_acc  = ((val_pred > 0.5).float() == y_val).float().mean().item()
 
-        avg_loss = sum(losses) / len(losses)
-
-        if (epoch + 1) % 10 == 0:
-            print(f"  Epoch {epoch+1:3d}/50 | Loss: {avg_loss:.4f} | Val Loss: {val_loss:.4f} | Val Acc: {val_acc*100:.1f}%")
+        scheduler.step(val_loss)
 
         if val_loss < best_val:
             best_val = val_loss
-            torch.save(model.state_dict(), "best_wakeword.pt")
+            torch.save(model.state_dict(), str(SCRIPT_DIR / "best_wakeword.pt"))
 
-        scheduler.step(val_loss)
+        if (epoch + 1) % 10 == 0:
+            print(f"  Epoch {epoch+1:3d}/{EPOCHS} | "
+                  f"Loss: {sum(losses)/len(losses):.4f} | "
+                  f"Val Loss: {val_loss:.4f} | "
+                  f"Val Acc: {val_acc*100:.1f}%")
 
-    # Bestes Modell laden und als ONNX exportieren
+    # Bestes Modell als ONNX exportieren
     print(f"\n  Exportiere als ONNX: {OUTPUT_MODEL}")
-    model.load_state_dict(torch.load("best_wakeword.pt"))
-    model.eval()
-    model.cpu()
+    model.load_state_dict(torch.load(str(SCRIPT_DIR / "best_wakeword.pt"), map_location="cpu"))
+    model.eval().cpu()
 
-    dummy = torch.zeros(1, 40, 300)
+    dummy = torch.zeros(1, N_CONTEXT, N_FEATURES)
     torch.onnx.export(
         model, dummy, OUTPUT_MODEL,
         input_names=["input"],
         output_names=["output"],
-        opset_version=11
+        dynamic_axes={"input": {0: "batch_size"}, "output": {0: "batch_size"}},
+        opset_version=11,
     )
 
     if os.path.exists(OUTPUT_MODEL):
         print(f"\n{'='*50}")
         print(f"  ✅ Fertig! Modell gespeichert: {OUTPUT_MODEL}")
-        print(f"  → Ersetze 'wakeword.onnx' in BMO durch '{OUTPUT_MODEL}'")
-        print(f"  → Oder ändere WAKE_WORD_MODEL = '{OUTPUT_MODEL}' in der Config")
+        print(f"  → Setze in bmo_desktop.py:")
+        print(f"     WAKE_WORD_MODEL = '{OUTPUT_MODEL}'")
         print(f"{'='*50}\n")
     else:
-        print("❌ Export fehlgeschlagen.")
+        print("❌ ONNX-Export fehlgeschlagen.")
+
 
 if __name__ == "__main__":
-    print("\n🤖 BMO Wakeword Trainer")
-    print(f"   Wort: '{WAKEWORD}'")
-    print(f"   Ausgabe: {OUTPUT_MODEL}\n")
+    print("\n  BMO Wakeword Trainer (openWakeWord-kompatibel)")
+    print(f"   Wakeword: '{WAKEWORD}'")
+    print(f"   Ausgabe:  {OUTPUT_MODEL}\n")
 
     setup_dirs()
 
-    # Prüfen ob bereits Daten vorhanden
     pos_existing = list(Path(f"{TRAIN_DIR}/positive").glob("*.wav"))
     neg_existing = list(Path(f"{TRAIN_DIR}/negative").glob("*.wav"))
 
     if len(pos_existing) > 10 and len(neg_existing) > 10:
-        print(f"✓ Bereits {len(pos_existing)} Positiv- und {len(neg_existing)} Negativ-Beispiele gefunden!")
-        print("  Überspringe Generierung und starte direkt mit Training...\n")
+        print(f"✓ Daten gefunden: {len(pos_existing)} Positiv, {len(neg_existing)} Negativ")
+        print("  Überspringe Generierung...\n")
         train_model()
     else:
         pos, neg = generate_training_data()
