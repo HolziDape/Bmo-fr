@@ -85,6 +85,7 @@ SPOTIFY_PLAYLIST_ID = "1CQx19s0ib50fjgxM47FXY"
 
 WHISPER_MODEL_SIZE = "small"
 VISION_MODEL       = "llava"          # ollama pull llava
+MAX_HISTORY        = 10               # letzte N Nachrichten als Ollama-Kontext
 
 # ── SYSTEM PROMPT ──────────────────────────────────────────────────────────
 BASE_SYSTEM_PROMPT = """Du heißt BMO und bist ein hilfreicher Assistent.
@@ -109,7 +110,12 @@ Pause:       {"action": "spotify_pause"}
 Weiter:      {"action": "spotify_resume"}
 Nächster:    {"action": "spotify_next"}
 Lautstärke:  {"action": "spotify_volume", "level": 50}
+Lauter:      {"action": "spotify_volume_up"}
+Leiser:      {"action": "spotify_volume_down"}
 Playlist:    {"action": "spotify_playlist"}
+Timer:       {"action": "set_timer", "minutes": 10, "label": "Nudeln"}
+App öffnen:  {"action": "open_app", "name": "chrome"}
+Screenshot:  {"action": "take_screenshot"}
 
 ### BEISPIELE AUSSCHALTEN ###
 "schalte den PC aus"        → {"action": "shutdown_pc"}
@@ -122,11 +128,27 @@ Playlist:    {"action": "spotify_playlist"}
 "pause"                     → {"action": "spotify_pause"}
 "weiter"                    → {"action": "spotify_resume"}
 "nächstes Lied"             → {"action": "spotify_next"}
-"lauter"                    → {"action": "spotify_volume", "level": 80}
-"leiser"                    → {"action": "spotify_volume", "level": 30}
+"lauter"                    → {"action": "spotify_volume_up"}
+"leiser"                    → {"action": "spotify_volume_down"}
 "Lautstärke auf 50"         → {"action": "spotify_volume", "level": 50}
 "spiel meine Playlist"      → {"action": "spotify_playlist"}
 "meine Lieblingsmusik"      → {"action": "spotify_playlist"}
+
+### BEISPIELE TIMER ###
+"stell einen Timer für 5 Minuten"      → {"action": "set_timer", "minutes": 5, "label": ""}
+"Timer 10 Minuten Nudeln kochen"       → {"action": "set_timer", "minutes": 10, "label": "Nudeln"}
+"erinner mich in einer halben Stunde"  → {"action": "set_timer", "minutes": 30, "label": ""}
+
+### BEISPIELE SCREENSHOT ###
+"mach einen Screenshot"     → {"action": "take_screenshot"}
+"screenshot"                → {"action": "take_screenshot"}
+"fotografier den Bildschirm" → {"action": "take_screenshot"}
+
+### BEISPIELE APP ÖFFNEN ###
+"öffne Chrome"              → {"action": "open_app", "name": "chrome"}
+"starte Discord"            → {"action": "open_app", "name": "discord"}
+"mach den Taschenrechner auf" → {"action": "open_app", "name": "calculator"}
+"öffne Explorer"            → {"action": "open_app", "name": "explorer"}
 """
 
 WITZE = [
@@ -135,6 +157,9 @@ WITZE = [
     "Was sagt ein großer Stift zum kleinen Stift? Wachsmalstift!",
     "Wie nennt man ein Kaninchen im Fitnessstudio? Pumpernickel!"
 ]
+
+# ── GESPRÄCHSVERLAUF (In-Memory Ollama-Kontext) ────────────────────────────
+_conversation_history = []
 
 # ── LAZY LOADING ───────────────────────────────────────────────────────────
 # Module werden erst beim ersten Aufruf geladen → Core startet sofort schnell
@@ -343,6 +368,95 @@ def spotify_get_volume():
         pass
     return None
 
+def spotify_volume_up():
+    current = spotify_get_volume()
+    if current is None: return "Spotify nicht verfügbar."
+    return spotify_volume(min(100, current + 20))
+
+def spotify_volume_down():
+    current = spotify_get_volume()
+    if current is None: return "Spotify nicht verfügbar."
+    return spotify_volume(max(0, current - 20))
+
+# ── TIMER ──────────────────────────────────────────────────────────────────
+
+def set_timer(minutes: float, label: str = ""):
+    display = f"{label} ({minutes} Min.)" if label else f"{minutes} Min."
+    def callback():
+        log.info(f"Timer '{display}' abgelaufen.")
+        try:
+            import pygame
+            pygame.mixer.init()
+            for dirpath, _, files in os.walk(SOUNDS_BASE):
+                for fname in files:
+                    if fname.lower().endswith('.wav'):
+                        pygame.mixer.music.load(os.path.join(dirpath, fname))
+                        pygame.mixer.music.play()
+                        while pygame.mixer.music.get_busy():
+                            time.sleep(0.1)
+                        return
+        except Exception as e:
+            log.warning(f"Timer-Sound Fehler: {e}")
+    t = threading.Timer(minutes * 60, callback)
+    t.daemon = True
+    t.start()
+    return f"Timer gestellt: {display}. Ich sage Bescheid!"
+
+# ── APP ÖFFNEN ─────────────────────────────────────────────────────────────
+
+APP_MAP = {
+    "chrome":         ["chrome"],
+    "firefox":        ["firefox"],
+    "edge":           ["msedge"],
+    "spotify":        [os.path.join(os.environ.get("LOCALAPPDATA", ""), "Microsoft", "WindowsApps", "Spotify.exe")],
+    "discord":        ["discord"],
+    "explorer":       ["explorer.exe"],
+    "datei":          ["explorer.exe"],
+    "notepad":        ["notepad.exe"],
+    "notizblock":     ["notepad.exe"],
+    "taschenrechner": ["calc.exe"],
+    "calculator":     ["calc.exe"],
+    "rechner":        ["calc.exe"],
+    "vs code":        ["code"],
+    "vscode":         ["code"],
+    "terminal":       ["wt.exe"],
+    "cmd":            ["cmd.exe"],
+    "taskmanager":    ["taskmgr.exe"],
+    "aufgaben":       ["taskmgr.exe"],
+}
+
+def open_app(name: str):
+    name_lower = name.lower()
+    for key, cmd in APP_MAP.items():
+        if key in name_lower:
+            try:
+                subprocess.Popen(cmd, creationflags=subprocess.CREATE_NO_WINDOW,
+                                 stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+                return f"{name.capitalize()} wird geöffnet."
+            except Exception as e:
+                try:
+                    subprocess.Popen(cmd[0])
+                    return f"{name.capitalize()} wird geöffnet."
+                except:
+                    return f"Konnte '{name}' nicht öffnen: {e}"
+    return f"Die App '{name}' kenne ich leider nicht."
+
+def take_screenshot():
+    """Macht einen Screenshot und speichert ihn im screenshots/ Ordner."""
+    try:
+        from PIL import ImageGrab
+        folder = os.path.join(SCRIPT_DIR, "screenshots")
+        os.makedirs(folder, exist_ok=True)
+        filename = datetime.datetime.now().strftime("screenshot_%Y%m%d_%H%M%S.png")
+        path = os.path.join(folder, filename)
+        img = ImageGrab.grab()
+        img.save(path)
+        log.info(f"Screenshot gespeichert: {path}")
+        return f"Screenshot gespeichert als {filename}."
+    except Exception as e:
+        log.error(f"Screenshot Fehler: {e}")
+        return "Screenshot fehlgeschlagen."
+
 def shutdown_pc():
     if os.path.exists(SHUTDOWN_DIR):
         sounds = [os.path.join(SHUTDOWN_DIR, f)
@@ -420,18 +534,23 @@ def do_jumpscare():
 
 def process_text(text: str) -> tuple:
     """
-    Schickt Text an Ollama, erkennt Aktionen, gibt (antwort, action) zurück.
-    FIX: Gibt jetzt immer ein Tupel (response_text, action_or_None) zurück,
-         damit Desktop und Web auf Aktionen reagieren können.
+    Schickt Text an Ollama (mit Gesprächskontext), erkennt Aktionen,
+    gibt (antwort, action) zurück.
     """
+    global _conversation_history
+
+    messages = [{'role': 'system', 'content': BASE_SYSTEM_PROMPT}]
+    messages.extend(_conversation_history)
+    messages.append({'role': 'user', 'content': text})
+
     try:
-        response = ollama.chat(model=OLLAMA_MODEL, messages=[
-            {'role': 'system', 'content': BASE_SYSTEM_PROMPT},
-            {'role': 'user',   'content': text},
-        ])
-        content = response['message']['content']
+        response = ollama.chat(model=OLLAMA_MODEL, messages=messages)
+        content  = response['message']['content']
     except Exception as e:
         return f"Ollama ist gerade nicht erreichbar: {e}", None
+
+    result_text = content
+    action_name = None
 
     if "{" in content and "action" in content:
         try:
@@ -439,39 +558,56 @@ def process_text(text: str) -> tuple:
             end    = content.rfind('}') + 1
             data   = json.loads(content[start:end])
             action = data.get("action", "")
+            action_name = action
 
             if action == "get_time":
-                return f"Es ist jetzt {datetime.datetime.now().strftime('%H:%M')} Uhr.", action
+                result_text = f"Es ist jetzt {datetime.datetime.now().strftime('%H:%M')} Uhr."
             elif action == "get_joke":
-                return random.choice(WITZE), action
+                result_text = random.choice(WITZE)
             elif action == "get_news":
-                return get_news(), action
+                result_text = get_news()
             elif action == "get_status":
                 cpu = psutil.cpu_percent()
                 ram = psutil.virtual_memory().percent
-                return f"CPU: {cpu}%, RAM: {ram}%. Alles läuft gut!", action
+                result_text = f"CPU: {cpu}%, RAM: {ram}%. Alles läuft gut!"
             elif action == "get_weather":
                 city = data.get("location", "Berlin")
-                return f"In {city} ist es aktuell {get_weather(city)}.", action
+                result_text = f"In {city} ist es aktuell {get_weather(city)}."
             elif action == "shutdown_pc":
                 threading.Thread(target=shutdown_pc, daemon=True).start()
-                return "Okay, ich fahre jetzt herunter. Tschüss!", action
+                result_text = "Okay, ich fahre jetzt herunter. Tschüss!"
             elif action == "spotify_play":
-                return spotify_play(data.get("query", "")), action
+                result_text = spotify_play(data.get("query", ""))
             elif action == "spotify_pause":
-                return spotify_pause(), action
+                result_text = spotify_pause()
             elif action == "spotify_resume":
-                return spotify_resume(), action
+                result_text = spotify_resume()
             elif action == "spotify_next":
-                return spotify_next(), action
+                result_text = spotify_next()
             elif action == "spotify_playlist":
-                return spotify_playlist(), action
+                result_text = spotify_playlist()
             elif action == "spotify_volume":
-                return spotify_volume(data.get("level", 50)), action
+                result_text = spotify_volume(data.get("level", 50))
+            elif action == "spotify_volume_up":
+                result_text = spotify_volume_up()
+            elif action == "spotify_volume_down":
+                result_text = spotify_volume_down()
+            elif action == "set_timer":
+                result_text = set_timer(data.get("minutes", 5), data.get("label", ""))
+            elif action == "open_app":
+                result_text = open_app(data.get("name", ""))
+            elif action == "take_screenshot":
+                result_text = take_screenshot()
         except json.JSONDecodeError:
             pass
 
-    return content, None
+    # Kontext aktualisieren (echter Antworttext, nicht JSON)
+    _conversation_history.append({'role': 'user',      'content': text})
+    _conversation_history.append({'role': 'assistant', 'content': result_text})
+    if len(_conversation_history) > MAX_HISTORY * 2:
+        _conversation_history = _conversation_history[-(MAX_HISTORY * 2):]
+
+    return result_text, action_name
 
 # ── ROUTES ─────────────────────────────────────────────────────────────────
 
@@ -626,6 +762,25 @@ def route_spotify_playlist():
     return jsonify(response=msg)
 
 
+@app.route('/spotify/current', methods=['GET'])
+def route_spotify_current():
+    """Gibt aktuell spielenden Track zurück."""
+    sp = get_spotify()
+    if not sp:
+        return jsonify(track=None, artist=None, playing=False)
+    try:
+        pb = sp.current_playback()
+        if pb and pb.get('item'):
+            return jsonify(
+                track=pb['item']['name'],
+                artist=pb['item']['artists'][0]['name'],
+                playing=pb['is_playing']
+            )
+    except:
+        pass
+    return jsonify(track=None, artist=None, playing=False)
+
+
 @app.route('/spotify/volume', methods=['GET', 'POST'])
 def route_spotify_volume():
     """GET → aktuelle Lautstärke; POST {level: 0-100} → Lautstärke setzen."""
@@ -690,6 +845,15 @@ def route_conversations_clear():
         return jsonify(ok=True)
     except Exception as e:
         return jsonify(ok=False, error=str(e))
+
+
+@app.route('/history/clear', methods=['POST'])
+def route_history_clear():
+    """In-Memory Kontext zurücksetzen."""
+    global _conversation_history
+    _conversation_history = []
+    log.info("Gesprächskontext gelöscht.")
+    return jsonify(status="ok")
 
 
 @app.route('/ping', methods=['GET'])
