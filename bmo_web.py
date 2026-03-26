@@ -25,17 +25,26 @@ logging.basicConfig(
 )
 log = logging.getLogger("BMO-Web")
 
-from flask import Flask, request, jsonify, Response
+from flask import Flask, request, jsonify, Response, session, redirect, url_for
 from flask_cors import CORS
 import requests as req
 import psutil
 import datetime
+import functools
 
 app  = Flask(__name__)
 CORS(app)
 
-PORT       = 5000
-CORE_URL   = "http://localhost:6000"
+PORT           = 5000
+CORE_URL       = "http://localhost:6000"
+WEB_PASSWORD   = "1505"                        # ← Passwort hier ändern
+app.secret_key = "bmo-secret-key-change-me-42"  # ← für Session-Cookie
+
+# ── TAILSCALE HTTPS ────────────────────────────────────────────────
+# Nach "tailscale cert damjan.xxxx.ts.net" die Pfade anpassen:
+TS_CERT = r"C:\Users\damja\damjan.tail18e29f.ts.net.crt"
+TS_KEY  = r"C:\Users\damja\damjan.tail18e29f.ts.net.key"
+SSL_CONTEXT = (TS_CERT, TS_KEY) if os.path.exists(TS_CERT) else None
 
 # ── VERBINDUNGSCHECK ───────────────────────────────────────────────
 def core_available():
@@ -44,6 +53,77 @@ def core_available():
         return r.status_code == 200
     except:
         return False
+
+# ── AUTH ────────────────────────────────────────────────────────────
+def login_required(f):
+    @functools.wraps(f)
+    def decorated(*args, **kwargs):
+        if not session.get('authenticated'):
+            if request.path.startswith('/api/'):
+                return jsonify(error="Nicht eingeloggt."), 401
+            return redirect(url_for('login'))
+        return f(*args, **kwargs)
+    return decorated
+
+LOGIN_HTML = """<!DOCTYPE html>
+<html lang="de">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+<title>BMO – Login</title>
+<style>
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  body {
+    height: 100dvh; display: flex; align-items: center; justify-content: center;
+    background: #1a1a2e;
+    font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif; color: #eee;
+  }
+  .card {
+    background: #16213e; border: 1px solid #2b3a5c; border-radius: 20px;
+    padding: 36px 28px; width: 100%; max-width: 360px; margin: 16px;
+  }
+  h1 { font-size: 28px; font-weight: 700; margin-bottom: 6px; color: #2b8773; }
+  p  { font-size: 13px; color: #aaa; margin-bottom: 28px; }
+  input[type=password] {
+    width: 100%; background: #0f1628; border: 1px solid #2b3a5c; border-radius: 14px;
+    padding: 14px 16px; color: #eee; font-size: 16px; outline: none; margin-bottom: 14px;
+  }
+  input[type=password]:focus { border-color: #2b8773; }
+  button {
+    width: 100%; background: #2b8773; border: none; border-radius: 14px;
+    padding: 14px; color: #fff; font-size: 16px; font-weight: 600; cursor: pointer;
+  }
+  .err { color: #ef4444; font-size: 13px; margin-top: 12px; text-align: center; }
+</style>
+</head>
+<body>
+<div class="card">
+  <h1>BMO 👾</h1>
+  <p>Passwort eingeben um fortzufahren.</p>
+  <form method="post">
+    <input type="password" name="password" placeholder="Passwort" autofocus autocomplete="current-password">
+    <button type="submit">Einloggen</button>
+    {% if error %}<div class="err">Falsches Passwort!</div>{% endif %}
+  </form>
+</div>
+</body>
+</html>"""
+
+@app.route('/login', methods=['GET', 'POST'])
+def login():
+    error = False
+    if request.method == 'POST':
+        if request.form.get('password') == WEB_PASSWORD:
+            session['authenticated'] = True
+            return redirect(url_for('index'))
+        error = True
+    from flask import render_template_string
+    return render_template_string(LOGIN_HTML, error=error)
+
+@app.route('/logout')
+def logout():
+    session.clear()
+    return redirect(url_for('login'))
 
 # ── BMO ICON SVG ──────────────────────────────────────────────────
 BMO_SVG = '''<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 180 215">
@@ -348,6 +428,7 @@ HTML = """<!DOCTYPE html>
   #sendBtn:disabled { opacity: .4; }
   #micBtn { background: #1e3a5f; color: #fff; }
   #micBtn.rec { background: #dc2626; animation: pulse .8s infinite; }
+  #camBtn { background: #1e3a5f; color: #fff; }
 
   /* ── OVERLAY ── */
   .overlay {
@@ -578,9 +659,7 @@ HTML = """<!DOCTYPE html>
     <button class="qbtn purple" onclick="showSpotify()">
       <span class="icon">🎵</span>Spotify
     </button>
-    <button class="qbtn teal" onclick="showCamera()">
-      <span class="icon">📷</span>Foto
-    </button>
+
     <button class="qbtn green" onclick="showHistory()">
       <span class="icon">💬</span>Verlauf
     </button>
@@ -589,6 +668,9 @@ HTML = """<!DOCTYPE html>
     </button>
     <button class="qbtn red" onclick="triggerJumpscare()">
       <span class="icon">👻</span>Jumpscare
+    </button>
+    <button class="qbtn" onclick="clearContext()" style="border-color:#64748b;color:#94a3b8;">
+      <span class="icon">🗑️</span>Reset
     </button>
   </div>
 
@@ -604,6 +686,7 @@ HTML = """<!DOCTYPE html>
   <div class="input-area">
     <textarea id="input" placeholder="Schreib BMO was..." rows="1"></textarea>
     <button class="ibtn" id="micBtn">🎤</button>
+    <button class="ibtn" id="camBtn" onclick="showCamera()">📷</button>
     <button class="ibtn" id="sendBtn">➤</button>
   </div>
 </div>
@@ -651,6 +734,13 @@ HTML = """<!DOCTYPE html>
   <div class="sheet" onclick="event.stopPropagation()">
     <div class="sheet-handle"></div>
     <h2>🎵 Spotify</h2>
+    <div id="nowPlaying" style="background:var(--bg3);border:1px solid var(--border);border-radius:14px;padding:12px 14px;margin-bottom:16px;min-height:48px;display:flex;align-items:center;gap:10px;">
+      <span style="font-size:20px;" id="npIcon">🎵</span>
+      <div style="flex:1;overflow:hidden;">
+        <div id="npTrack"  style="font-size:14px;font-weight:600;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">Lädt...</div>
+        <div id="npArtist" style="font-size:12px;color:var(--text2);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;"></div>
+      </div>
+    </div>
     <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-bottom:20px;">
       <button onclick="spPlaylist()" style="padding:14px;background:var(--green);border:none;border-radius:14px;color:#fff;font-size:15px;font-weight:600;cursor:pointer;">▶ Playlist</button>
       <button onclick="spPause()"    style="padding:14px;background:var(--bg3);border:1px solid var(--border);border-radius:14px;color:var(--text);font-size:15px;font-weight:600;cursor:pointer;">⏸ Pause</button>
@@ -760,6 +850,23 @@ async function updateStatus() {
 updateStatus();
 setInterval(updateStatus, 5000);
 
+// ── CHAT-VERLAUF LADEN ───────────────────────────────────────────
+async function loadChatHistory() {
+  try {
+    const r = await fetch('/api/conversations');
+    const d = await r.json();
+    const convs = (d.conversations || []).slice(0, 20).reverse();
+    if (!convs.length) return;
+    chat.innerHTML = '';
+    convs.forEach(c => {
+      addMsg(c.user, 'user');
+      addMsg(c.bmo,  'bmo');
+    });
+    addMsg('— ältere Nachrichten oben —', 'sys');
+  } catch(e) {}
+}
+loadChatHistory();
+
 // ── OVERLAY ─────────────────────────────────────────────────────
 function showStats()       { updateStatus(); document.getElementById('statsOverlay').classList.add('show'); }
 function confirmShutdown() { document.getElementById('shutdownOverlay').classList.add('show'); }
@@ -788,6 +895,13 @@ async function quickAction(msg) {
 function doShutdown() { quickAction('schalte den PC aus'); }
 
 // ── JUMPSCARE ────────────────────────────────────────────────────
+async function clearContext() {
+  try {
+    await fetch('/api/history/clear', {method: 'POST'});
+    chat.innerHTML = '<div class="msg sys">Kontext gelöscht 🗑️</div>';
+  } catch(e) { addMsg('Fehler 😢', 'sys'); }
+}
+
 async function triggerJumpscare() {
   try {
     await fetch('/api/jumpscare', {method: 'POST'});
@@ -798,7 +912,24 @@ async function triggerJumpscare() {
 }
 
 // ── SPOTIFY ─────────────────────────────────────────────────────
+async function updateNowPlaying() {
+  try {
+    const r = await fetch('/api/spotify/current');
+    const d = await r.json();
+    if (d.track) {
+      document.getElementById('npTrack').textContent  = d.track;
+      document.getElementById('npArtist').textContent = d.artist;
+      document.getElementById('npIcon').textContent   = d.playing ? '▶️' : '⏸';
+    } else {
+      document.getElementById('npTrack').textContent  = 'Nichts läuft gerade';
+      document.getElementById('npArtist').textContent = '';
+      document.getElementById('npIcon').textContent   = '🎵';
+    }
+  } catch(e) {}
+}
+
 async function showSpotify() {
+  updateNowPlaying();
   try {
     const r = await fetch('/api/spotify/volume');
     const d = await r.json();
@@ -1098,6 +1229,7 @@ micBtn.addEventListener('click', async () => {
 
 # ── ROUTES ────────────────────────────────────────────────────────
 @app.route('/')
+@login_required
 def index():
     return HTML
 
@@ -1118,6 +1250,7 @@ def manifest():
     )
 
 @app.route('/api/status')
+@login_required
 def status():
     try:
         r = req.get(f"{CORE_URL}/status", timeout=2)
@@ -1129,6 +1262,7 @@ def status():
         return jsonify(cpu=cpu, ram=ram, time=time, gpu=None)
 
 @app.route('/api/chat', methods=['POST'])
+@login_required
 def chat_endpoint():
     data    = request.json or {}
     message = data.get('message', '').strip()
@@ -1143,6 +1277,7 @@ def chat_endpoint():
         return jsonify(response=f"Core nicht erreichbar: {e}", audio=None)
 
 @app.route('/api/voice', methods=['POST'])
+@login_required
 def voice_endpoint():
     data = request.json or {}
     b64  = data.get('audio', '')
@@ -1165,6 +1300,7 @@ def voice_endpoint():
         return jsonify(transcript='', response=f"Core nicht erreichbar: {e}", audio=None)
 
 @app.route('/api/photo', methods=['POST'])
+@login_required
 def photo_endpoint():
     data = request.json or {}
     try:
@@ -1174,6 +1310,7 @@ def photo_endpoint():
         return jsonify(response=f"Core nicht erreichbar: {e}", action=None)
 
 @app.route('/api/conversations', methods=['GET'])
+@login_required
 def conversations_get():
     try:
         r = req.get(f"{CORE_URL}/conversations", timeout=5)
@@ -1182,6 +1319,7 @@ def conversations_get():
         return jsonify(conversations=[], error=str(e))
 
 @app.route('/api/conversations', methods=['DELETE'])
+@login_required
 def conversations_delete():
     try:
         r = req.delete(f"{CORE_URL}/conversations", timeout=5)
@@ -1190,6 +1328,7 @@ def conversations_delete():
         return jsonify(ok=False, error=str(e))
 
 @app.route('/api/jumpscare', methods=['POST'])
+@login_required
 def jumpscare_proxy():
     try:
         r = req.post(f"{CORE_URL}/jumpscare", timeout=5)
@@ -1198,6 +1337,7 @@ def jumpscare_proxy():
         return jsonify(response=f"Fehler: {e}")
 
 @app.route('/api/spotify/playlist', methods=['POST'])
+@login_required
 def spotify_playlist_proxy():
     try:
         r = req.post(f"{CORE_URL}/spotify/playlist", timeout=15)
@@ -1205,7 +1345,26 @@ def spotify_playlist_proxy():
     except Exception as e:
         return jsonify(response=f"Fehler: {e}")
 
+@app.route('/api/history/clear', methods=['POST'])
+@login_required
+def history_clear_proxy():
+    try:
+        r = req.post(f"{CORE_URL}/history/clear", timeout=5)
+        return jsonify(r.json())
+    except Exception as e:
+        return jsonify(status="error", message=str(e))
+
+@app.route('/api/spotify/current', methods=['GET'])
+@login_required
+def spotify_current_proxy():
+    try:
+        r = req.get(f"{CORE_URL}/spotify/current", timeout=5)
+        return jsonify(r.json())
+    except Exception as e:
+        return jsonify(track=None, artist=None, playing=False)
+
 @app.route('/api/spotify/volume', methods=['GET', 'POST'])
+@login_required
 def spotify_volume_proxy():
     try:
         if request.method == 'GET':
@@ -1219,10 +1378,15 @@ def spotify_volume_proxy():
 
 # ── START ──────────────────────────────────────────────────────────
 if __name__ == '__main__':
-    log.info(f"BMO Web Interface startet auf Port {PORT}...")
-    log.info(f"Lokal: http://localhost:{PORT}")
+    proto = "https" if SSL_CONTEXT else "http"
+    log.info(f"BMO Web Interface startet auf Port {PORT} ({proto.upper()})...")
+    log.info(f"Lokal: {proto}://localhost:{PORT}")
+    if SSL_CONTEXT:
+        log.info("Tailscale-Zertifikat geladen.")
+    else:
+        log.warning("Kein Zertifikat gefunden — läuft ohne HTTPS (Mikro/Kamera nur auf localhost).")
     if core_available():
         log.info(f"Core erreichbar auf {CORE_URL}")
     else:
         log.warning("Core NICHT erreichbar!")
-    app.run(host='0.0.0.0', port=PORT, debug=False)
+    app.run(host='0.0.0.0', port=PORT, debug=False, ssl_context=SSL_CONTEXT or None)
