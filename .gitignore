@@ -1,7 +1,8 @@
 /openWakeWord
 
-# Lokale Konfiguration (Passwort) — nicht ins Repo
+# Lokale Konfiguration — nicht ins Repo
 bmo_config.txt
+bmo_python.txt
 freund/.spotify_cache
 .spotify_cache
 
