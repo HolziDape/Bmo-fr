@@ -80,8 +80,8 @@ Bmo/
 ### Schritt 2 · Repo klonen
 
 ```bash
-git clone https://github.com/damjanGP/Bmo.git
-cd Bmo
+git clone https://github.com/HolziDape/Bmo-fr.git
+cd Bmo-fr
 ```
 
 ### Schritt 3 · Abhängigkeiten installieren
@@ -222,7 +222,7 @@ Du brauchst **nur den `freund/`-Ordner**. Den Rest musst du nicht installieren.
 
 Entweder das ganze Repo klonen und nur `freund/` benutzen:
 ```bash
-git clone https://github.com/damjanGP/Bmo.git
+git clone https://github.com/HolziDape/Bmo-fr.git
 ```
 Oder nur den `freund/`-Ordner von deinem Freund bekommen (ZIP, USB, etc.).
 
