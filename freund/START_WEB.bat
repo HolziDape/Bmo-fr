@@ -15,7 +15,7 @@ echo  ========================================
 echo.
 
 cd /d "%~dp0"
-start "" "D:\python\Thonny\python.exe" bmo_web_freund.py
+start "" python bmo_web_freund.py
 
 echo   [ OK ]  BMO laeuft!
 echo   [ OK ]  Browser oeffnet sich gleich...

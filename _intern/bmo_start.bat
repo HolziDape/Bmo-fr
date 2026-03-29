@@ -14,7 +14,8 @@ echo   Core + Web werden gestartet...
 echo  ========================================
 echo.
 
-start "" "D:\python\Thonny\pythonw.exe" "D:\python\scripts\Bmo\bmo_watchdog.py"
+start "" pythonw "%~dp0..\bmo_watchdog.py"
+if errorlevel 1 start "" python "%~dp0..\bmo_watchdog.py"
 
 echo   [ OK ]  Watchdog laeuft im Hintergrund
 echo   [ OK ]  Core + Web werden automatisch gestartet

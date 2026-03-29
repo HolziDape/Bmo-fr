@@ -15,7 +15,7 @@ echo  ========================================
 echo.
 
 cd /d "%~dp0"
-start "" "D:\python\Thonny\python.exe" "D:\python\scripts\Bmo\bmo_desktop.py"
+start "" python "%~dp0..\bmo_desktop.py"
 
 echo   [ OK ]  BMO Desktop laeuft!
 echo.
