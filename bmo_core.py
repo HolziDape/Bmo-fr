@@ -741,6 +741,7 @@ def route_status():
 
     # GPU via wmi (AMD-kompatibel)
     gpu_load = None
+    gpu_mem  = None   # FIX: immer initialisieren, sonst UnboundLocalError
     try:
         import wmi
         w = wmi.WMI(namespace="root\OpenHardwareMonitor")
@@ -788,10 +789,13 @@ def route_spotify_current():
     try:
         pb = sp.current_playback()
         if pb and pb.get('item'):
+            images = pb['item'].get('album', {}).get('images', [])
+            cover  = images[1]['url'] if len(images) > 1 else (images[0]['url'] if images else None)
             return jsonify(
                 track=pb['item']['name'],
                 artist=pb['item']['artists'][0]['name'],
-                playing=pb['is_playing']
+                playing=pb['is_playing'],
+                cover=cover
             )
     except:
         pass
@@ -899,15 +903,6 @@ def route_ping():
 
 # ── START ───────────────────────────────────────────────────────────────────
 if __name__ == '__main__':
-    print("\n🤖 BMO Core startet...")
-    print(f"   Port       : {PORT}")
-    print(f"   Modell     : {OLLAMA_MODEL}")
-    print(f"   Whisper    : {WHISPER_MODEL_SIZE}  (lazy – wird beim 1. Aufruf geladen)")
-    print(f"   TTS/RVC    : {RVC_MODEL}")
-    print(f"\n   Endpunkte  :")
-    print(f"   POST  /process     → Text → Antwort + action")
-    print(f"   POST  /transcribe  → Audio → Transkript + Antwort + action")
-    print(f"   POST  /speak       → Text → WAV (base64)")
-    print(f"   GET   /status      → CPU / RAM / Uhrzeit / Temp")
-    print(f"   GET   /ping        → Lebenszeichen\n")
+    log.info("BMO Core startet...")
+    log.info(f"Port: {PORT} | Modell: {OLLAMA_MODEL} | Whisper: {WHISPER_MODEL_SIZE}")
     app.run(host='0.0.0.0', port=PORT, debug=False, threaded=True)

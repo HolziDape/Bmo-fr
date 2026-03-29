@@ -31,6 +31,15 @@ import requests as req
 import psutil
 import datetime
 import functools
+import io
+import threading
+import time as _time
+
+try:
+    from PIL import ImageGrab
+    _SCREEN_OK = True
+except ImportError:
+    _SCREEN_OK = False
 
 app  = Flask(__name__)
 CORS(app)
@@ -39,12 +48,8 @@ PORT           = 5000
 CORE_URL       = "http://localhost:6000"
 WEB_PASSWORD   = "1505"                        # ← Passwort hier ändern
 app.secret_key = "bmo-secret-key-change-me-42"  # ← für Session-Cookie
+FRIEND_URL     = "http://HIER_FREUND_IP:5000"   # ← Tailscale-IP des Freundes eintragen
 
-# ── TAILSCALE HTTPS ────────────────────────────────────────────────
-# Nach "tailscale cert damjan.xxxx.ts.net" die Pfade anpassen:
-TS_CERT = r"C:\Users\damja\damjan.tail18e29f.ts.net.crt"
-TS_KEY  = r"C:\Users\damja\damjan.tail18e29f.ts.net.key"
-SSL_CONTEXT = (TS_CERT, TS_KEY) if os.path.exists(TS_CERT) else None
 
 # ── VERBINDUNGSCHECK ───────────────────────────────────────────────
 def core_available():
@@ -678,6 +683,80 @@ HTML = """<!DOCTYPE html>
   .timer-item { position: relative; overflow: hidden; }
   .timer-item.ending .timer-countdown { color: #f97316; }
   .timer-item.critical .timer-countdown { color: #ef4444; animation: pulse .6s infinite; }
+
+  /* ── COMMANDS OVERLAY ── */
+  .cmd-category { margin-bottom: 18px; }
+  .cmd-category-title {
+    font-size: 12px;
+    font-weight: 600;
+    color: var(--text2);
+    text-transform: uppercase;
+    letter-spacing: .8px;
+    margin-bottom: 8px;
+  }
+  .cmd-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(120px, 1fr));
+    gap: 8px;
+  }
+  .cmd-btn {
+    background: var(--bg3);
+    border: 1px solid var(--border);
+    border-radius: 12px;
+    padding: 10px 8px;
+    color: var(--text);
+    font-size: 13px;
+    font-weight: 500;
+    cursor: pointer;
+    text-align: center;
+    transition: background .15s, transform .1s;
+    line-height: 1.3;
+  }
+  .cmd-btn:active { transform: scale(.95); background: var(--border); }
+
+  /* ── SCREEN OVERLAY ── */
+  .screen-overlay {
+    align-items: center;
+    justify-content: center;
+    padding: 0;
+  }
+  .screen-sheet {
+    background: #000;
+    border-radius: 16px;
+    overflow: hidden;
+    width: calc(100% - 24px);
+    max-width: 900px;
+    max-height: 92dvh;
+    display: flex;
+    flex-direction: column;
+    transform: scale(.9);
+    transition: transform .25s cubic-bezier(.32,1,.23,1);
+  }
+  .overlay.show .screen-sheet { transform: scale(1); }
+  .screen-header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: 10px 14px;
+    background: var(--bg3);
+    flex-shrink: 0;
+  }
+  #screenImg {
+    width: 100%;
+    height: auto;
+    display: block;
+    object-fit: contain;
+    background: #000;
+  }
+  #friendScreenImg {
+    width: 100%;
+    height: auto;
+    display: block;
+    object-fit: contain;
+    background: #000;
+  }
+  /* Admin-zu-Freund Buttons */
+  .qbtn.friend { border-color: #f59e0b; color: #fbbf24; }
 </style>
 </head>
 <body>
@@ -702,17 +781,23 @@ HTML = """<!DOCTYPE html>
       <span class="icon">🎵</span>Spotify
     </button>
 
-    <button class="qbtn green" onclick="showHistory()">
-      <span class="icon">💬</span>Verlauf
-    </button>
     <button class="qbtn orange" onclick="confirmShutdown()">
       <span class="icon">⏻</span>Shutdown
     </button>
     <button class="qbtn red" onclick="triggerJumpscare()">
       <span class="icon">👻</span>Jumpscare
     </button>
-    <button class="qbtn" onclick="clearContext()" style="border-color:#64748b;color:#94a3b8;">
-      <span class="icon">🗑️</span>Reset
+    <button class="qbtn" onclick="showCommands()" style="border-color:#6366f1;color:#818cf8;">
+      <span class="icon">📋</span>Befehle
+    </button>
+    <button class="qbtn" onclick="showScreen()" style="border-color:#0ea5e9;color:#38bdf8;">
+      <span class="icon">🖥️</span>Screen
+    </button>
+    <button class="qbtn friend" onclick="triggerFriendJumpscare()">
+      <span class="icon">👻</span>F.Scare
+    </button>
+    <button class="qbtn friend" onclick="showFriendScreen()">
+      <span class="icon">🖥️</span>F.Screen
     </button>
   </div>
 
@@ -779,11 +864,13 @@ HTML = """<!DOCTYPE html>
   <div class="sheet" onclick="event.stopPropagation()">
     <div class="sheet-handle"></div>
     <h2>🎵 Spotify</h2>
-    <div id="nowPlaying" style="background:var(--bg3);border:1px solid var(--border);border-radius:14px;padding:12px 14px;margin-bottom:16px;min-height:48px;display:flex;align-items:center;gap:10px;">
-      <span style="font-size:20px;" id="npIcon">🎵</span>
+    <div id="nowPlaying" style="background:var(--bg3);border:1px solid var(--border);border-radius:14px;padding:12px 14px;margin-bottom:16px;display:flex;align-items:center;gap:12px;">
+      <img id="npCover" src="" alt=""
+        style="width:64px;height:64px;border-radius:10px;object-fit:cover;flex-shrink:0;background:var(--bg2);display:none;">
+      <span id="npIcon" style="font-size:28px;flex-shrink:0;">🎵</span>
       <div style="flex:1;overflow:hidden;">
         <div id="npTrack"  style="font-size:14px;font-weight:600;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">Lädt...</div>
-        <div id="npArtist" style="font-size:12px;color:var(--text2);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;"></div>
+        <div id="npArtist" style="font-size:12px;color:var(--text2);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;margin-top:2px;"></div>
       </div>
     </div>
     <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-bottom:20px;">
@@ -843,21 +930,50 @@ HTML = """<!DOCTYPE html>
   </div>
 </div>
 
-<!-- VERLAUF OVERLAY -->
-<div class="overlay" id="historyOverlay" onclick="closeOverlay('historyOverlay')">
+
+<!-- COMMANDS OVERLAY -->
+<div class="overlay" id="commandsOverlay" onclick="closeOverlay('commandsOverlay')">
   <div class="sheet" onclick="event.stopPropagation()">
     <div class="sheet-handle"></div>
-    <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:16px;">
-      <h2 style="margin:0;">💬 Gesprächsverlauf</h2>
-      <button onclick="clearHistory()"
-        style="background:none;border:1px solid #ef4444;border-radius:10px;color:#ef4444;font-size:12px;padding:6px 10px;cursor:pointer;">
-        Alles löschen
-      </button>
-    </div>
-    <div id="historyList" class="notes-list">
+    <h2>📋 Alle Befehle</h2>
+    <div id="commandsList">
       <div class="notes-empty">Lade...</div>
     </div>
-    <button class="btn-primary" onclick="closeOverlay('historyOverlay')">Schließen</button>
+    <button class="btn-primary" onclick="closeOverlay('commandsOverlay')" style="margin-top:14px;">Schließen</button>
+  </div>
+</div>
+
+<!-- SCREEN OVERLAY -->
+<div class="overlay screen-overlay" id="screenOverlay">
+  <div class="screen-sheet" onclick="event.stopPropagation()">
+    <div class="screen-header">
+      <span style="font-weight:600;font-size:15px;color:#e2e8f0;">🖥️ Bildschirm Live</span>
+      <div style="display:flex;gap:8px;align-items:center;">
+        <span id="screenFps" style="font-size:11px;color:#64748b;"></span>
+        <button onclick="closeScreen()"
+          style="background:none;border:1px solid #334155;border-radius:8px;color:#94a3b8;padding:5px 12px;cursor:pointer;font-size:13px;">
+          ✕ Schließen
+        </button>
+      </div>
+    </div>
+    <img id="screenImg" src="" alt="Bildschirm wird geladen...">
+  </div>
+</div>
+
+<!-- FREUND SCREEN OVERLAY -->
+<div class="overlay screen-overlay" id="friendScreenOverlay">
+  <div class="screen-sheet" onclick="event.stopPropagation()">
+    <div class="screen-header">
+      <span style="font-weight:600;font-size:15px;color:#fbbf24;">🖥️ Freund – Bildschirm Live</span>
+      <div style="display:flex;gap:8px;align-items:center;">
+        <span id="friendScreenStatus" style="font-size:11px;color:#64748b;"></span>
+        <button onclick="closeFriendScreen()"
+          style="background:none;border:1px solid #334155;border-radius:8px;color:#94a3b8;padding:5px 12px;cursor:pointer;font-size:13px;">
+          ✕ Schließen
+        </button>
+      </div>
+    </div>
+    <img id="friendScreenImg" src="" alt="Freund Bildschirm wird geladen...">
   </div>
 </div>
 
@@ -948,27 +1064,64 @@ async function pollTimers() {
 pollTimers();
 setInterval(pollTimers, 1000);
 
-// ── CHAT-VERLAUF LADEN ───────────────────────────────────────────
-async function loadChatHistory() {
-  try {
-    const r = await fetch('/api/conversations');
-    const d = await r.json();
-    const convs = (d.conversations || []).slice(0, 20).reverse();
-    if (!convs.length) return;
-    chat.innerHTML = '';
-    convs.forEach(c => {
-      addMsg(c.user, 'user');
-      addMsg(c.bmo,  'bmo');
-    });
-    addMsg('— ältere Nachrichten oben —', 'sys');
-  } catch(e) {}
-}
-loadChatHistory();
 
 // ── OVERLAY ─────────────────────────────────────────────────────
 function showStats()       { updateStatus(); document.getElementById('statsOverlay').classList.add('show'); }
 function confirmShutdown() { document.getElementById('shutdownOverlay').classList.add('show'); }
 function closeOverlay(id)  { document.getElementById(id).classList.remove('show'); }
+
+// ── COMMANDS OVERLAY ─────────────────────────────────────────────
+async function showCommands() {
+  document.getElementById('commandsOverlay').classList.add('show');
+  const list = document.getElementById('commandsList');
+  try {
+    const r = await fetch('/api/commands');
+    const d = await r.json();
+    list.innerHTML = '';
+    d.commands.forEach(cat => {
+      const section = document.createElement('div');
+      section.className = 'cmd-category';
+      section.innerHTML = `<div class="cmd-category-title">${cat.icon} ${cat.category}</div>`;
+      const grid = document.createElement('div');
+      grid.className = 'cmd-grid';
+      cat.items.forEach(item => {
+        const btn = document.createElement('button');
+        btn.className = 'cmd-btn';
+        btn.textContent = item.label;
+        btn.onclick = () => runCommand(item.msg);
+        grid.appendChild(btn);
+      });
+      section.appendChild(grid);
+      list.appendChild(section);
+    });
+  } catch(e) {
+    list.innerHTML = '<div class="notes-empty">Fehler beim Laden.</div>';
+  }
+}
+
+function runCommand(msg) {
+  closeOverlay('commandsOverlay');
+  input.value = msg;
+  send();
+}
+
+// ── SCREEN OVERLAY ───────────────────────────────────────────────
+let _screenActive = false;
+
+function showScreen() {
+  _screenActive = true;
+  document.getElementById('screenOverlay').classList.add('show');
+  document.getElementById('screenImg').src = '/api/screen?' + Date.now();
+}
+
+function closeScreen() {
+  _screenActive = false;
+  document.getElementById('screenOverlay').classList.remove('show');
+  // src leeren stoppt den MJPEG-Stream (spart Bandbreite)
+  setTimeout(() => {
+    if (!_screenActive) document.getElementById('screenImg').src = '';
+  }, 300);
+}
 
 // ── QUICK ACTIONS ────────────────────────────────────────────────
 async function quickAction(msg) {
@@ -1009,19 +1162,63 @@ async function triggerJumpscare() {
   }
 }
 
+// ── FREUND AKTIONEN ──────────────────────────────────────────────
+async function triggerFriendJumpscare() {
+  try {
+    const r = await fetch('/api/friend/jumpscare', {method: 'POST'});
+    const d = await r.json();
+    if (d.ok) {
+      addMsg('👻 Jumpscare an Freund gesendet!', 'sys');
+    } else {
+      addMsg('⛔ Freund hat Admin-Zugriff nicht aktiviert.', 'sys');
+    }
+  } catch(e) {
+    addMsg('Freund nicht erreichbar 😢', 'sys');
+  }
+}
+
+let _friendScreenActive = false;
+function showFriendScreen() {
+  _friendScreenActive = true;
+  document.getElementById('friendScreenStatus').textContent = 'Verbinde...';
+  document.getElementById('friendScreenOverlay').classList.add('show');
+  const img = document.getElementById('friendScreenImg');
+  img.src = '/api/friend/screen?' + Date.now();
+  img.onload = () => { document.getElementById('friendScreenStatus').textContent = 'Live'; };
+  img.onerror = () => { document.getElementById('friendScreenStatus').textContent = '⛔ Kein Zugriff'; img.src = ''; };
+}
+function closeFriendScreen() {
+  _friendScreenActive = false;
+  document.getElementById('friendScreenOverlay').classList.remove('show');
+  setTimeout(() => { if (!_friendScreenActive) document.getElementById('friendScreenImg').src = ''; }, 300);
+}
+
 // ── SPOTIFY ─────────────────────────────────────────────────────
 async function updateNowPlaying() {
   try {
     const r = await fetch('/api/spotify/current');
     const d = await r.json();
+    const cover  = document.getElementById('npCover');
+    const icon   = document.getElementById('npIcon');
     if (d.track) {
       document.getElementById('npTrack').textContent  = d.track;
       document.getElementById('npArtist').textContent = d.artist;
-      document.getElementById('npIcon').textContent   = d.playing ? '▶️' : '⏸';
+      icon.textContent = d.playing ? '▶️' : '⏸️';
+      if (d.cover) {
+        cover.src          = d.cover;
+        cover.style.display = 'block';
+        icon.style.display  = 'none';
+      } else {
+        cover.style.display = 'none';
+        icon.style.display  = 'block';
+        icon.textContent    = d.playing ? '▶️' : '⏸️';
+      }
     } else {
       document.getElementById('npTrack').textContent  = 'Nichts läuft gerade';
       document.getElementById('npArtist').textContent = '';
-      document.getElementById('npIcon').textContent   = '🎵';
+      cover.style.display = 'none';
+      icon.style.display  = 'block';
+      icon.textContent    = '🎵';
     }
   } catch(e) {}
 }
@@ -1320,6 +1517,9 @@ micBtn.addEventListener('click', async () => {
     micBtn.textContent = '🎤';
   }
 });
+
+// ── FRESH START ON LOAD ──────────────────────────────────────────
+fetch('/api/history/clear', {method: 'POST'}).catch(() => {});
 </script>
 </body>
 </html>
@@ -1483,17 +1683,122 @@ def spotify_volume_proxy():
     except Exception as e:
         return jsonify(volume=None, error=str(e))
 
+# ── COMMANDS ──────────────────────────────────────────────────────
+COMMANDS = [
+    {"category": "Zeit & Info", "icon": "ℹ️", "items": [
+        {"label": "Uhrzeit",        "msg": "Wie spät ist es?"},
+        {"label": "System Status",  "msg": "System Status"},
+        {"label": "Wetter",         "msg": "Wie ist das Wetter?"},
+        {"label": "News",           "msg": "Was gibt es Neues?"},
+        {"label": "Witz",           "msg": "Erzähl mir einen Witz"},
+    ]},
+    {"category": "Musik", "icon": "🎵", "items": [
+        {"label": "Playlist",       "msg": "Spiel meine Playlist"},
+        {"label": "Pause",          "msg": "Pause"},
+        {"label": "Weiter",         "msg": "weiter"},
+        {"label": "Skip",           "msg": "nächstes Lied"},
+        {"label": "Lauter",         "msg": "lauter"},
+        {"label": "Leiser",         "msg": "leiser"},
+        {"label": "Lautstärke 50%", "msg": "Lautstärke 50"},
+        {"label": "Lautstärke 80%", "msg": "Lautstärke 80"},
+    ]},
+    {"category": "Apps öffnen", "icon": "🖥️", "items": [
+        {"label": "Chrome",         "msg": "Öffne Chrome"},
+        {"label": "Spotify",        "msg": "Öffne Spotify"},
+        {"label": "Discord",        "msg": "Öffne Discord"},
+        {"label": "VS Code",        "msg": "Öffne VS Code"},
+        {"label": "Explorer",       "msg": "Öffne Explorer"},
+        {"label": "Notepad",        "msg": "Öffne Notepad"},
+        {"label": "Rechner",        "msg": "Öffne Rechner"},
+        {"label": "Terminal",       "msg": "Öffne Terminal"},
+        {"label": "Task-Manager",   "msg": "Öffne Task Manager"},
+    ]},
+    {"category": "System", "icon": "⚙️", "items": [
+        {"label": "Screenshot",     "msg": "Mach einen Screenshot"},
+        {"label": "Timer 5min",     "msg": "Timer 5 Minuten"},
+        {"label": "Timer 10min",    "msg": "Timer 10 Minuten"},
+        {"label": "Timer 25min",    "msg": "Timer 25 Minuten"},
+        {"label": "Timer 1h",       "msg": "Timer 60 Minuten"},
+        {"label": "PC ausschalten", "msg": "schalte den PC aus"},
+    ]},
+]
+
+@app.route('/api/commands')
+@login_required
+def commands_list():
+    return jsonify(commands=COMMANDS)
+
+# ── SCREEN STREAMING ──────────────────────────────────────────────
+_screen_lock = threading.Lock()
+
+def _screen_generator():
+    """MJPEG-Generator: streamt den Desktop als ca. 10 FPS JPEG-Stream."""
+    while True:
+        if not _SCREEN_OK:
+            break
+        try:
+            with _screen_lock:
+                img = ImageGrab.grab()
+            # Auf max. 1280px Breite skalieren
+            w, h = img.size
+            new_w = min(w, 1280)
+            new_h = int(h * new_w / w)
+            if (new_w, new_h) != (w, h):
+                img = img.resize((new_w, new_h))
+            buf = io.BytesIO()
+            img.save(buf, format='JPEG', quality=55)
+            frame = buf.getvalue()
+            yield (b'--frame\r\nContent-Type: image/jpeg\r\n\r\n' + frame + b'\r\n')
+        except Exception:
+            pass
+        _time.sleep(0.1)   # max. 10 FPS
+
+@app.route('/api/screen')
+@login_required
+def screen_stream():
+    if not _SCREEN_OK:
+        return jsonify(error="Pillow (PIL) nicht installiert. Bitte: pip install Pillow"), 503
+    return Response(_screen_generator(),
+                    mimetype='multipart/x-mixed-replace; boundary=frame')
+
+# ── FREUND PROXY ROUTEN ────────────────────────────────────────────
+
+@app.route('/api/friend/jumpscare', methods=['POST'])
+@login_required
+def friend_jumpscare():
+    """Sendet Jumpscare an Freund (nur wenn Freund Admin-Zugriff aktiviert hat)."""
+    if "HIER_FREUND_IP" in FRIEND_URL:
+        return jsonify(ok=False, error="FRIEND_URL nicht konfiguriert.")
+    try:
+        r = req.post(f"{FRIEND_URL}/api/admin/jumpscare", timeout=5)
+        return jsonify(r.json())
+    except Exception as e:
+        return jsonify(ok=False, error=str(e))
+
+@app.route('/api/friend/screen')
+@login_required
+def friend_screen():
+    """Streamt den Bildschirm des Freundes (nur wenn Freund Admin-Zugriff aktiviert hat)."""
+    if "HIER_FREUND_IP" in FRIEND_URL:
+        return jsonify(error="FRIEND_URL nicht konfiguriert."), 503
+    try:
+        r = req.get(f"{FRIEND_URL}/api/admin/screen", stream=True, timeout=10)
+        if r.status_code == 403:
+            return jsonify(error="Freund hat Zugriff nicht erlaubt."), 403
+        return Response(
+            r.iter_content(chunk_size=4096),
+            content_type=r.headers.get('Content-Type', 'multipart/x-mixed-replace; boundary=frame')
+        )
+    except Exception as e:
+        return jsonify(error=str(e)), 503
+
+
 # ── START ──────────────────────────────────────────────────────────
 if __name__ == '__main__':
-    proto = "https" if SSL_CONTEXT else "http"
-    log.info(f"BMO Web Interface startet auf Port {PORT} ({proto.upper()})...")
-    log.info(f"Lokal: {proto}://localhost:{PORT}")
-    if SSL_CONTEXT:
-        log.info("Tailscale-Zertifikat geladen.")
-    else:
-        log.warning("Kein Zertifikat gefunden — läuft ohne HTTPS (Mikro/Kamera nur auf localhost).")
+    log.info(f"BMO Web Interface startet auf Port {PORT}...")
+    log.info(f"Lokal: http://localhost:{PORT}")
     if core_available():
         log.info(f"Core erreichbar auf {CORE_URL}")
     else:
         log.warning("Core NICHT erreichbar!")
-    app.run(host='0.0.0.0', port=PORT, debug=False, ssl_context=SSL_CONTEXT or None)
+    app.run(host='0.0.0.0', port=PORT, debug=False)

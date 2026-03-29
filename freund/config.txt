@@ -1,0 +1,21 @@
+# ══════════════════════════════════════════════════════════
+#  BMO Freund-Version — Konfiguration
+#  Trage hier deine Einstellungen ein, dann START_WEB.bat
+# ══════════════════════════════════════════════════════════
+
+# ── VERBINDUNG ─────────────────────────────────────────────
+# Tailscale-IP deines Freundes (Admin-PC)
+# Findest du bei ihm mit: tailscale ip -4
+CORE_IP   = HIER_IP_EINTRAGEN
+CORE_PORT = 6000
+
+# ── SPOTIFY (optional) ─────────────────────────────────────
+# Nur ausfüllen wenn du Spotify-Steuerung willst.
+# Anleitung: https://developer.spotify.com/dashboard
+# → App erstellen → Client ID + Secret kopieren
+# → Redirect URI eintragen: http://127.0.0.1:8888/callback
+
+SPOTIFY_CLIENT_ID     = HIER_CLIENT_ID_EINTRAGEN
+SPOTIFY_CLIENT_SECRET = HIER_CLIENT_SECRET_EINTRAGEN
+SPOTIFY_REDIRECT_URI  = http://127.0.0.1:8888/callback
+SPOTIFY_PLAYLIST_ID   = HIER_PLAYLIST_ID_EINTRAGEN
