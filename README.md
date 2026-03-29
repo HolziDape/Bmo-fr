@@ -19,7 +19,7 @@ Inspiriert von BMO aus Adventure Time. Läuft lokal auf Windows — kein Cloud-Z
 | ☁️ Wetter & News | Aktuelle Infos auf Anfrage |
 | 💻 System-Status | CPU, RAM, Uhrzeit |
 | 😱 Jumpscare | Selbsterklärend |
-| 👥 Freundes-Modus | Freund kann BMO per Web nutzen (eigener Client) |
+| 👥 Freundes-Modus | Freund kann BMO per Web nutzen → [Bmo_f](https://github.com/HolziDape/Bmo_f) |
 
 ---
 
@@ -43,12 +43,6 @@ Bmo/
 ├── bmo_watchdog.py      ← 🔁 Auto-Neustart wenn etwas abstürzt
 ├── bmo_start.bat        ← ▶️ Startet alles (Doppelklick)
 ├── bmo_stop.bat         ← ⏹️ Stoppt alle BMO-Prozesse
-│
-├── freund/              ← 👥 Freundes-Version (eigener Ordner)
-│   ├── bmo_web_freund.py   ← Web-Client für den Freund
-│   ├── config.txt          ← IP-Adresse + Spotify eintragen
-│   ├── START_WEB.bat       ← Starten (Doppelklick)
-│   └── SETUP_EINMALIG.bat  ← Einmalige Installation
 │
 ├── models/
 │   ├── hey_bmo.onnx     ← Wake-Word Modell (nicht im Repo — siehe unten)
@@ -217,65 +211,11 @@ WshShell.Run "pythonw C:\Pfad\zu\Bmo\bmo_watchdog.py", 0, False
 
 ## 🚀 Installation — Freund
 
-Du brauchst **nur den `freund/`-Ordner**. Den Rest musst du nicht installieren.
+Die Freundes-Version ist in einem **eigenen Repo**:
 
-### Schritt 1 · Voraussetzungen
+> 👉 **https://github.com/HolziDape/Bmo_f**
 
-| Was | Wo |
-|---|---|
-| Python 3.10 | https://python.org |
-| Tailscale | https://tailscale.com *(um den Core deines Freundes zu erreichen)* |
-
-### Schritt 2 · Ordner holen
-
-Entweder das ganze Repo klonen und nur `freund/` benutzen:
-```bash
-git clone https://github.com/HolziDape/Bmo-fr.git
-```
-Oder nur den `freund/`-Ordner von deinem Freund bekommen (ZIP, USB, etc.).
-
-### Schritt 3 · config.txt ausfüllen
-
-```
-# IP-Adresse deines Freundes (Tailscale-IP)
-CORE_IP   = 100.x.x.x
-CORE_PORT = 6000
-
-# Spotify (optional — nur wenn du Spotify-Steuerung willst)
-SPOTIFY_CLIENT_ID     = HIER_CLIENT_ID_EINTRAGEN
-SPOTIFY_CLIENT_SECRET = HIER_CLIENT_SECRET_EINTRAGEN
-SPOTIFY_REDIRECT_URI  = http://127.0.0.1:8888/callback
-SPOTIFY_PLAYLIST_ID   = HIER_PLAYLIST_ID_EINTRAGEN
-```
-
-> 💡 Spotify ist **optional**. Wenn du es nicht einträgst, funktioniert alles außer Spotify.
-
-### Schritt 4 · Abhängigkeiten installieren
-
-**Pflicht:**
-```bash
-pip install flask flask-cors requests psutil
-```
-
-**Spotify** *(optional)*:
-```bash
-pip install spotipy
-```
-
-**Bildschirm-Streaming** *(optional — für Admin-Zugriff auf deinen Screen)*:
-```bash
-pip install pillow
-```
-
-Oder einfach `SETUP_EINMALIG.bat` doppelklicken — das macht alles automatisch.
-
-### Schritt 5 · Starten
-
-```
-START_WEB.bat  ← Doppelklick
-```
-
-Browser öffnet sich automatisch auf `http://localhost:5000`
+Dort gibt es eine eigene Anleitung.
 
 ---
 
