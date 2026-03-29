@@ -162,39 +162,143 @@ LOGIN_HTML = """<!DOCTYPE html>
 <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
 <title>BMO – Login</title>
 <style>
-  * { box-sizing: border-box; margin: 0; padding: 0; }
-  body {
-    height: 100dvh; display: flex; align-items: center; justify-content: center;
-    background: #1a1a2e;
-    font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif; color: #eee;
+  * { box-sizing: border-box; margin: 0; padding: 0; -webkit-tap-highlight-color: transparent; }
+  :root {
+    --green: #2b8773; --green-dark: #1f6458;
+    --bg: #1a1a2e; --bg2: #16213e; --bg3: #0f1628;
+    --border: #2b3a5c; --text: #eee; --text2: #aaa;
   }
+  html, body {
+    height: 100%; background: var(--bg);
+    font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+    color: var(--text); overflow: hidden;
+  }
+  /* animierter Hintergrund */
+  body::before {
+    content: ''; position: fixed; inset: 0; z-index: 0;
+    background: radial-gradient(ellipse at 20% 50%, rgba(43,135,115,.15) 0%, transparent 60%),
+                radial-gradient(ellipse at 80% 20%, rgba(43,135,115,.10) 0%, transparent 50%);
+    animation: bgPulse 6s ease-in-out infinite alternate;
+  }
+  @keyframes bgPulse {
+    from { opacity: .6; }
+    to   { opacity: 1; }
+  }
+  .wrap {
+    position: relative; z-index: 1;
+    height: 100dvh; display: flex; flex-direction: column;
+    align-items: center; justify-content: center; padding: 24px;
+  }
+  /* BMO Figur */
+  .bmo-figure {
+    width: 90px; height: 90px; margin-bottom: 20px;
+    animation: bmoFloat 3s ease-in-out infinite;
+    filter: drop-shadow(0 8px 24px rgba(43,135,115,.4));
+  }
+  @keyframes bmoFloat {
+    0%,100% { transform: translateY(0);   }
+    50%      { transform: translateY(-8px); }
+  }
+  /* Karte */
   .card {
-    background: #16213e; border: 1px solid #2b3a5c; border-radius: 20px;
-    padding: 36px 28px; width: 100%; max-width: 360px; margin: 16px;
+    background: var(--bg2); border: 1px solid var(--border);
+    border-radius: 24px; padding: 32px 28px;
+    width: 100%; max-width: 360px;
+    box-shadow: 0 20px 60px rgba(0,0,0,.5);
+    animation: cardIn .4s cubic-bezier(.32,1,.23,1);
   }
-  h1 { font-size: 28px; font-weight: 700; margin-bottom: 6px; color: #2b8773; }
-  p  { font-size: 13px; color: #aaa; margin-bottom: 28px; }
+  @keyframes cardIn {
+    from { opacity: 0; transform: translateY(20px) scale(.97); }
+    to   { opacity: 1; transform: none; }
+  }
+  .card-title {
+    font-size: 22px; font-weight: 700; color: var(--text);
+    text-align: center; margin-bottom: 4px;
+  }
+  .card-sub {
+    font-size: 13px; color: var(--text2);
+    text-align: center; margin-bottom: 24px;
+  }
+  .input-wrap { position: relative; margin-bottom: 14px; }
+  .input-wrap .icon {
+    position: absolute; left: 14px; top: 50%; transform: translateY(-50%);
+    font-size: 18px; pointer-events: none;
+  }
   input[type=password] {
-    width: 100%; background: #0f1628; border: 1px solid #2b3a5c; border-radius: 14px;
-    padding: 14px 16px; color: #eee; font-size: 16px; outline: none; margin-bottom: 14px;
+    width: 100%; background: var(--bg3); border: 1px solid var(--border);
+    border-radius: 14px; padding: 14px 16px 14px 42px;
+    color: var(--text); font-size: 16px; outline: none;
+    transition: border-color .2s;
   }
-  input[type=password]:focus { border-color: #2b8773; }
-  button {
-    width: 100%; background: #2b8773; border: none; border-radius: 14px;
-    padding: 14px; color: #fff; font-size: 16px; font-weight: 600; cursor: pointer;
+  input[type=password]:focus { border-color: var(--green); }
+  input[type=password]::placeholder { color: #555; }
+  button[type=submit] {
+    width: 100%; background: var(--green); border: none; border-radius: 14px;
+    padding: 14px; color: #fff; font-size: 16px; font-weight: 700;
+    cursor: pointer; transition: background .15s, transform .1s;
+    letter-spacing: .3px;
   }
-  .err { color: #ef4444; font-size: 13px; margin-top: 12px; text-align: center; }
+  button[type=submit]:hover  { background: var(--green-dark); }
+  button[type=submit]:active { transform: scale(.97); }
+  .err {
+    display: flex; align-items: center; gap: 8px;
+    background: rgba(239,68,68,.12); border: 1px solid rgba(239,68,68,.3);
+    border-radius: 12px; padding: 10px 14px;
+    color: #fca5a5; font-size: 13px; margin-top: 12px;
+    animation: shake .3s ease;
+  }
+  @keyframes shake {
+    0%,100%{ transform: translateX(0); }
+    25%     { transform: translateX(-6px); }
+    75%     { transform: translateX(6px); }
+  }
 </style>
 </head>
 <body>
-<div class="card">
-  <h1>BMO 👾</h1>
-  <p>Passwort eingeben um fortzufahren.</p>
-  <form method="post">
-    <input type="password" name="password" placeholder="Passwort" autofocus autocomplete="current-password">
-    <button type="submit">Einloggen</button>
-    {% if error %}<div class="err">Falsches Passwort!</div>{% endif %}
-  </form>
+<div class="wrap">
+  <!-- BMO Figur (inline SVG) -->
+  <svg class="bmo-figure" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 180 215">
+    <defs>
+      <linearGradient id="lg1" x1="0" y1="0" x2="0" y2="1"><stop offset="0%" stop-color="#c2e8e0"/><stop offset="100%" stop-color="#96c8be"/></linearGradient>
+      <linearGradient id="lg2" x1="0" y1="0" x2="0" y2="1"><stop offset="0%" stop-color="#d0ede7"/><stop offset="100%" stop-color="#aed8d0"/></linearGradient>
+      <linearGradient id="lg3" x1="0" y1="0" x2="0" y2="1"><stop offset="0%" stop-color="#1f6b5a"/><stop offset="100%" stop-color="#2d9478"/></linearGradient>
+      <radialGradient id="rg1" cx="38%" cy="35%"><stop offset="0%" stop-color="#f060aa"/><stop offset="100%" stop-color="#c0206a"/></radialGradient>
+      <radialGradient id="rg2" cx="38%" cy="35%"><stop offset="0%" stop-color="#4050c8"/><stop offset="100%" stop-color="#1a2080"/></radialGradient>
+      <linearGradient id="lg4" x1="0" y1="0" x2="0" y2="1"><stop offset="0%" stop-color="#ffd020"/><stop offset="100%" stop-color="#d49a00"/></linearGradient>
+    </defs>
+    <rect width="180" height="215" fill="#6ecfbf"/>
+    <rect x="11" y="7" width="158" height="202" rx="24" fill="#3ea090"/>
+    <rect x="14" y="10" width="152" height="199" rx="22" fill="url(#lg1)"/>
+    <rect x="19" y="15" width="142" height="112" rx="19" fill="#7ab8ae"/>
+    <rect x="22" y="18" width="136" height="108" rx="17" fill="url(#lg2)"/>
+    <rect x="28" y="21" width="124" height="18" rx="10" fill="rgba(255,255,255,0.22)"/>
+    <ellipse cx="68" cy="60" rx="8" ry="10" fill="#1a1a1a"/>
+    <ellipse cx="65" cy="57" rx="2.5" ry="3" fill="rgba(255,255,255,0.35)"/>
+    <ellipse cx="112" cy="60" rx="8" ry="10" fill="#1a1a1a"/>
+    <ellipse cx="109" cy="57" rx="2.5" ry="3" fill="rgba(255,255,255,0.35)"/>
+    <path d="M53 90 Q90 124 127 90 Q90 100 53 90Z" fill="url(#lg3)"/>
+    <path d="M56 92 Q90 104 124 92" stroke="#e8f8f2" stroke-width="4" fill="none" stroke-linecap="round"/>
+    <rect x="19" y="133" width="92" height="11" rx="5.5" fill="#2a8070"/>
+    <circle cx="137" cy="138" r="10" fill="url(#rg2)"/>
+    <rect x="31" y="154" width="36" height="14" rx="4" fill="url(#lg4)"/>
+    <rect x="42" y="143" width="14" height="36" rx="4" fill="url(#lg4)"/>
+    <circle cx="138" cy="181" r="16" fill="url(#rg1)"/>
+  </svg>
+
+  <div class="card">
+    <div class="card-title">Hallo! Ich bin BMO 👾</div>
+    <div class="card-sub">Passwort eingeben um fortzufahren</div>
+    <form method="post">
+      <div class="input-wrap">
+        <span class="icon">🔑</span>
+        <input type="password" name="password" placeholder="Passwort" autofocus autocomplete="current-password">
+      </div>
+      <button type="submit">Einloggen ➤</button>
+      {% if error %}
+      <div class="err">⚠️ Falsches Passwort!</div>
+      {% endif %}
+    </form>
+  </div>
 </div>
 </body>
 </html>"""
