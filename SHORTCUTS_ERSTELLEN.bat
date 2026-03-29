@@ -25,11 +25,15 @@ powershell -NoProfile -Command "$ws=New-Object -ComObject WScript.Shell; $sc=$ws
 :: Shortcut: BMO Stoppen (rot — Shell-Icon 131)
 powershell -NoProfile -Command "$ws=New-Object -ComObject WScript.Shell; $sc=$ws.CreateShortcut('%DIR%BMO Stoppen.lnk'); $sc.TargetPath='%DIR%_intern\bmo_stop.bat'; $sc.WorkingDirectory='%DIR%'; $sc.IconLocation='%SystemRoot%\system32\shell32.dll,131'; $sc.Description='Alle BMO Prozesse beenden'; $sc.Save()"
 
-echo   [ OK ]  3 Verknuepfungen erstellt:
+:: Shortcut: Firewall Setup (Schild-Icon)
+powershell -NoProfile -Command "$ws=New-Object -ComObject WScript.Shell; $sc=$ws.CreateShortcut('%DIR%BMO Firewall Setup.lnk'); $sc.TargetPath='%DIR%_intern\FIREWALL_SETUP.bat'; $sc.WorkingDirectory='%DIR%'; $sc.IconLocation='%SystemRoot%\system32\imageres.dll,54'; $sc.Description='Firewall-Regeln fuer BMO einrichten (einmalig)'; $sc.Save()"
+
+echo   [ OK ]  4 Verknuepfungen erstellt:
 echo.
-echo          BMO Starten.lnk   (in diesem Ordner)
-echo          BMO Desktop.lnk   (in diesem Ordner)
-echo          BMO Stoppen.lnk   (in diesem Ordner)
+echo          BMO Starten.lnk        (in diesem Ordner)
+echo          BMO Desktop.lnk        (in diesem Ordner)
+echo          BMO Stoppen.lnk        (in diesem Ordner)
+echo          BMO Firewall Setup.lnk (in diesem Ordner)
 echo.
 echo   Die Bat-Dateien liegen in:  _intern\
 echo.

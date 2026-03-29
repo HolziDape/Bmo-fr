@@ -46,30 +46,45 @@ CORS(app)
 
 PORT       = 5000
 CORE_URL   = "http://localhost:6000"
-FRIEND_URL = "http://HIER_FREUND_IP:5000"   # ← Tailscale-IP des Freundes eintragen
 
-# ── PASSWORT (aus bmo_config.txt, sonst web-basierte Ersteinrichtung) ──
+# ── KONFIGURATION (aus bmo_config.txt) ────────────────────────────
 _CONFIG_PATH = os.path.join(os.path.dirname(os.path.abspath(__file__)), "bmo_config.txt")
 
-def _load_password():
-    """Liest Passwort aus bmo_config.txt. Gibt None zurück wenn noch keins gesetzt."""
+def _load_config():
+    """Liest alle Schlüssel aus bmo_config.txt als Dict."""
+    cfg = {}
     if os.path.exists(_CONFIG_PATH):
         with open(_CONFIG_PATH, "r", encoding="utf-8") as f:
             for line in f:
                 line = line.strip()
-                if line.startswith("WEB_PASSWORD="):
-                    pw = line.split("=", 1)[1].strip()
-                    if pw:
-                        return pw
-    return None
+                if "=" in line and not line.startswith("#"):
+                    k, v = line.split("=", 1)
+                    cfg[k.strip()] = v.strip()
+    return cfg
+
+def _save_config(data: dict):
+    """Schreibt alle Schlüssel in bmo_config.txt."""
+    with open(_CONFIG_PATH, "w", encoding="utf-8") as f:
+        for k, v in data.items():
+            f.write(f"{k}={v}\n")
+    log.info("bmo_config.txt gespeichert.")
+
+_cfg           = _load_config()
+WEB_PASSWORD   = _cfg.get("WEB_PASSWORD", "").strip() or None
+FRIEND_URL     = _cfg.get("FRIEND_URL", "http://HIER_FREUND_IP:5000").strip()
+app.secret_key = (WEB_PASSWORD or "bmo-setup-mode") + "-bmo-secret-42"
 
 def _save_password(pw: str):
-    with open(_CONFIG_PATH, "w", encoding="utf-8") as f:
-        f.write(f"WEB_PASSWORD={pw}\n")
+    cfg = _load_config()
+    cfg["WEB_PASSWORD"] = pw
+    _save_config(cfg)
     log.info("Passwort in bmo_config.txt gespeichert.")
 
-WEB_PASSWORD   = _load_password()   # None = noch nicht eingerichtet
-app.secret_key = (WEB_PASSWORD or "bmo-setup-mode") + "-bmo-secret-42"
+def _save_friend_url(url: str):
+    cfg = _load_config()
+    cfg["FRIEND_URL"] = url
+    _save_config(cfg)
+    log.info(f"FRIEND_URL gespeichert: {url}")
 
 
 # ── VERBINDUNGSCHECK ───────────────────────────────────────────────
@@ -172,6 +187,12 @@ SETUP_HTML = """<!DOCTYPE html>
       <div class="input-wrap">
         <span class="icon">🔒</span>
         <input type="password" name="password2" placeholder="Nochmal eingeben..." autocomplete="new-password">
+      </div>
+      <div class="lbl" style="margin-top:16px;">Freund IP <span style="color:#555;font-weight:400;">(optional — für Jumpscare &amp; Screen)</span></div>
+      <div class="input-wrap">
+        <span class="icon">👥</span>
+        <input type="text" name="friend_url" placeholder="http://100.x.x.x:5000" autocomplete="off"
+          style="width:100%;background:var(--bg3);border:1px solid var(--border);border-radius:14px;padding:13px 16px 13px 42px;color:var(--text);font-size:16px;outline:none;transition:border-color .2s;">
       </div>
       <button type="submit">Speichern &amp; Loslegen ➤</button>
     </form>
@@ -349,19 +370,23 @@ def logout():
 @app.route('/setup', methods=['GET', 'POST'])
 def setup():
     """Ersteinrichtung — wird beim ersten Start angezeigt wenn noch kein Passwort gesetzt ist."""
-    global WEB_PASSWORD
+    global WEB_PASSWORD, FRIEND_URL
     if WEB_PASSWORD:
         return redirect(url_for('login'))
     error = None
     if request.method == 'POST':
-        pw  = request.form.get('password', '').strip()
-        pw2 = request.form.get('password2', '').strip()
+        pw         = request.form.get('password', '').strip()
+        pw2        = request.form.get('password2', '').strip()
+        friend_url = request.form.get('friend_url', '').strip()
         if not pw:
             error = 'Passwort darf nicht leer sein.'
         elif pw != pw2:
             error = 'Passwörter stimmen nicht überein.'
         else:
             _save_password(pw)
+            if friend_url:
+                _save_friend_url(friend_url)
+                FRIEND_URL = friend_url
             WEB_PASSWORD   = pw
             app.secret_key = pw + "-bmo-secret-42"
             session['authenticated'] = True
