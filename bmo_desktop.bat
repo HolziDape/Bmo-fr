@@ -1,8 +1,26 @@
 @echo off
-echo Starte BMO Desktop (Wake-Word + GUI)...
+color 0B
+cls
+echo.
+echo  ██████╗ ███╗   ███╗ ██████╗
+echo  ██╔══██╗████╗ ████║██╔═══██╗
+echo  ██████╔╝██╔████╔██║██║   ██║
+echo  ██╔══██╗██║╚██╔╝██║██║   ██║
+echo  ██████╔╝██║ ╚═╝ ██║╚██████╔╝
+echo  ╚═════╝ ╚═╝     ╚═╝ ╚═════╝
+echo.
+echo  ----------------------------------------
+echo   Desktop-GUI wird gestartet...
+echo  ----------------------------------------
+echo.
+
 cd /d "%~dp0"
 start "" "D:\python\Thonny\python.exe" "D:\python\scripts\Bmo\bmo_desktop.py"
+
+echo   [OK]  BMO Desktop laeuft!
 echo.
-echo BMO Desktop laeuft!
-echo (Wake-Word aktiv — sag "Hey BMO" um zu starten)
-timeout /t 3 /nobreak >nul
+echo   Sag  "Hey BMO"  um zu starten.
+echo.
+echo  ----------------------------------------
+echo.
+timeout /t 4 /nobreak >nul
