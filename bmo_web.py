@@ -2041,4 +2041,11 @@ if __name__ == '__main__':
         log.info(f"Core erreichbar auf {CORE_URL}")
     else:
         log.warning("Core NICHT erreichbar!")
+    if not WEB_PASSWORD:
+        log.info("Ersteinrichtung erforderlich — öffne Browser auf /setup ...")
+        def _open_setup():
+            import time, webbrowser
+            time.sleep(1.5)
+            webbrowser.open(f"http://localhost:{PORT}/setup")
+        threading.Thread(target=_open_setup, daemon=True).start()
     app.run(host='0.0.0.0', port=PORT, debug=False)
