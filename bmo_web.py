@@ -44,11 +44,43 @@ except ImportError:
 app  = Flask(__name__)
 CORS(app)
 
-PORT           = 5000
-CORE_URL       = "http://localhost:6000"
-WEB_PASSWORD   = "1505"                        # ← Passwort hier ändern
-app.secret_key = "bmo-secret-key-change-me-42"  # ← für Session-Cookie
-FRIEND_URL     = "http://HIER_FREUND_IP:5000"   # ← Tailscale-IP des Freundes eintragen
+PORT       = 5000
+CORE_URL   = "http://localhost:6000"
+FRIEND_URL = "http://HIER_FREUND_IP:5000"   # ← Tailscale-IP des Freundes eintragen
+
+# ── PASSWORT (aus bmo_config.txt oder Ersteinrichtung) ─────────────
+_CONFIG_PATH = os.path.join(os.path.dirname(os.path.abspath(__file__)), "bmo_config.txt")
+
+def _load_or_create_password() -> str:
+    """Liest Passwort aus bmo_config.txt — fragt beim ersten Start danach."""
+    if os.path.exists(_CONFIG_PATH):
+        with open(_CONFIG_PATH, "r", encoding="utf-8") as f:
+            for line in f:
+                line = line.strip()
+                if line.startswith("WEB_PASSWORD="):
+                    pw = line.split("=", 1)[1].strip()
+                    if pw:
+                        return pw
+    # Ersteinrichtung
+    print("\n" + "="*50)
+    print("  BMO – Ersteinrichtung")
+    print("="*50)
+    while True:
+        pw  = input("  Wähle ein Login-Passwort für das Web-Interface: ").strip()
+        pw2 = input("  Passwort wiederholen: ").strip()
+        if not pw:
+            print("  ✗ Passwort darf nicht leer sein.\n")
+        elif pw != pw2:
+            print("  ✗ Passwörter stimmen nicht überein.\n")
+        else:
+            break
+    with open(_CONFIG_PATH, "w", encoding="utf-8") as f:
+        f.write(f"WEB_PASSWORD={pw}\n")
+    print(f"  ✓ Passwort gespeichert in bmo_config.txt\n{'='*50}\n")
+    return pw
+
+WEB_PASSWORD   = _load_or_create_password()
+app.secret_key = WEB_PASSWORD + "-bmo-secret-42"
 
 
 # ── VERBINDUNGSCHECK ───────────────────────────────────────────────

@@ -120,12 +120,14 @@ Die Modell-Dateien sind bereits im Repo enthalten und werden beim Klonen automat
 
 ### Schritt 5 · Starten
 
-**Einfach per Doppelklick:**
-```
-bmo_start.bat
-```
+| Was | Doppelklick auf |
+|---|---|
+| Core + Web (Hintergrund, empfohlen) | `bmo_start.bat` |
+| Desktop-GUI mit Wake-Word | `bmo_desktop.bat` |
 
-Das startet den Watchdog, der automatisch `bmo_core.py` und `bmo_web.py` im Hintergrund überwacht und bei Absturz neu startet.
+`bmo_start.bat` startet den Watchdog, der Core und Web automatisch überwacht und bei Absturz neu startet.
+
+> 💡 **Erster Start:** Beim allerersten Start von `bmo_web.py` wirst du im Terminal nach einem Login-Passwort gefragt. Es wird in `bmo_config.txt` gespeichert und danach nie wieder abgefragt.
 
 **Oder manuell:**
 ```bash
@@ -153,9 +155,15 @@ python bmo_desktop.py
 
 ### bmo_web.py
 
+Das Passwort wird beim ersten Start interaktiv gesetzt und in `bmo_config.txt` gespeichert.
+Willst du es nachträglich ändern, einfach `bmo_config.txt` öffnen und die Zeile anpassen:
+```
+WEB_PASSWORD=deinNeuesPasswort
+```
+
+Die Tailscale-IP des Freundes direkt in `bmo_web.py` eintragen *(nur für F.Scare / F.Screen nötig)*:
 ```python
-WEB_PASSWORD = "1505"          # ← Login-Passwort für das Web-Interface
-FRIEND_URL   = "http://HIER_FREUND_IP:5000"  # ← Tailscale-IP des Freundes (für F.Scare / F.Screen)
+FRIEND_URL = "http://HIER_FREUND_IP:5000"
 ```
 
 ### bmo_desktop.py
@@ -290,6 +298,31 @@ In `bmo_web.py` die Tailscale-IP des Freundes eintragen:
 ```python
 FRIEND_URL = "http://100.x.x.x:5000"   # ← Tailscale-IP des Freundes
 ```
+
+---
+
+## ⚡ Geschwindigkeit & GPU
+
+BMO läuft komplett lokal — die Antwortgeschwindigkeit hängt stark von deiner Hardware ab.
+
+### Ungefähre Antwortzeiten
+
+| Hardware | Web-Interface | Desktop (nach Wake-Word) |
+|---|---|---|
+| Moderne NVIDIA GPU (RTX 3000+) | ~3–6 Sek. | ~5–9 Sek. |
+| Ältere NVIDIA GPU | ~6–12 Sek. | ~9–16 Sek. |
+| AMD GPU | ~10–25 Sek. | ~15–30 Sek. |
+| Nur CPU (kein GPU) | ~30–90 Sek. | ~40–120 Sek. |
+
+> ⚠️ **AMD GPU:** Ollama hat aktuell keine native AMD-Unterstützung auf Windows — das Modell läuft auf der CPU, was deutlich langsamer ist. Auf Linux funktioniert AMD GPU (ROCm) besser.
+
+> 💡 **Erste Nachrichten dauern länger:** Beim allerersten Start müssen Ollama (KI) und Whisper (Spracherkennung) ihre Modelle in den Speicher laden. Das kann **30–60 Sekunden extra** dauern. Ab der zweiten Nachricht läuft alles normal.
+
+### Tipps für mehr Geschwindigkeit
+
+- **Schnelleres Modell:** In `bmo_core.py` `OLLAMA_MODEL = "llama3"` auf `"llama3.2:1b"` ändern — deutlich schneller, aber etwas weniger schlau
+- **Whisper verkleinern:** `WHISPER_MODEL_SIZE = "small"` auf `"tiny"` ändern — schnellere Spracherkennung, etwas ungenauer
+- **RAM:** Mindestens 16 GB empfohlen, 32 GB für flüssigen Betrieb
 
 ---
 
