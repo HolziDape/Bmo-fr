@@ -51,6 +51,53 @@ FRIEND_URL = "http://HIER_FREUND_IP:5000"   # ← Tailscale-IP des Freundes eint
 # ── PASSWORT (aus bmo_config.txt oder Ersteinrichtung) ─────────────
 _CONFIG_PATH = os.path.join(os.path.dirname(os.path.abspath(__file__)), "bmo_config.txt")
 
+def _has_console() -> bool:
+    """Prüft ob ein sichtbares Konsolenfenster vorhanden ist (python.exe vs pythonw.exe)."""
+    try:
+        import ctypes
+        return ctypes.windll.kernel32.GetConsoleWindow() != 0
+    except Exception:
+        return True
+
+def _ask_password_gui() -> str:
+    """Fragt Passwort per tkinter-Dialog ab (wenn kein Konsolenfenster da ist)."""
+    import tkinter as tk
+    from tkinter import simpledialog, messagebox
+
+    root = tk.Tk()
+    root.withdraw()
+    root.lift()
+    root.attributes('-topmost', True)
+
+    while True:
+        pw = simpledialog.askstring(
+            "BMO – Ersteinrichtung",
+            "Waehle ein Login-Passwort fuer das Web-Interface:",
+            show='*', parent=root
+        )
+        if pw is None:  # Abbrechen gedrückt
+            messagebox.showerror("BMO", "Kein Passwort gesetzt. BMO wird beendet.")
+            root.destroy()
+            sys.exit(1)
+        pw = pw.strip()
+        if not pw:
+            messagebox.showwarning("BMO", "Passwort darf nicht leer sein.")
+            continue
+        pw2 = simpledialog.askstring(
+            "BMO – Ersteinrichtung",
+            "Passwort wiederholen:",
+            show='*', parent=root
+        )
+        if pw2 is None:
+            continue
+        if pw != pw2.strip():
+            messagebox.showwarning("BMO", "Passwoerter stimmen nicht ueberein.")
+            continue
+        break
+
+    root.destroy()
+    return pw
+
 def _load_or_create_password() -> str:
     """Liest Passwort aus bmo_config.txt — fragt beim ersten Start danach."""
     if os.path.exists(_CONFIG_PATH):
@@ -61,22 +108,28 @@ def _load_or_create_password() -> str:
                     pw = line.split("=", 1)[1].strip()
                     if pw:
                         return pw
-    # Ersteinrichtung
-    print("\n" + "="*50)
-    print("  BMO – Ersteinrichtung")
-    print("="*50)
-    while True:
-        pw  = input("  Wähle ein Login-Passwort für das Web-Interface: ").strip()
-        pw2 = input("  Passwort wiederholen: ").strip()
-        if not pw:
-            print("  ✗ Passwort darf nicht leer sein.\n")
-        elif pw != pw2:
-            print("  ✗ Passwörter stimmen nicht überein.\n")
-        else:
-            break
+
+    # Ersteinrichtung — Eingabe je nach verfügbarem Fenster
+    if _has_console():
+        print("\n" + "="*50)
+        print("  BMO - Ersteinrichtung")
+        print("="*50)
+        while True:
+            pw  = input("  Waehle ein Login-Passwort: ").strip()
+            pw2 = input("  Passwort wiederholen:      ").strip()
+            if not pw:
+                print("  Passwort darf nicht leer sein.\n")
+            elif pw != pw2:
+                print("  Passwoerter stimmen nicht ueberein.\n")
+            else:
+                break
+        print(f"  Passwort gespeichert!\n{'='*50}\n")
+    else:
+        pw = _ask_password_gui()
+
     with open(_CONFIG_PATH, "w", encoding="utf-8") as f:
         f.write(f"WEB_PASSWORD={pw}\n")
-    print(f"  ✓ Passwort gespeichert in bmo_config.txt\n{'='*50}\n")
+    log.info("Passwort gesetzt und in bmo_config.txt gespeichert.")
     return pw
 
 WEB_PASSWORD   = _load_or_create_password()

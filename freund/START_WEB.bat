@@ -1,27 +1,27 @@
 @echo off
+chcp 65001 >nul
 color 0A
 cls
 echo.
-echo  ██████╗ ███╗   ███╗ ██████╗
-echo  ██╔══██╗████╗ ████║██╔═══██╗
-echo  ██████╔╝██╔████╔██║██║   ██║
-echo  ██╔══██╗██║╚██╔╝██║██║   ██║
-echo  ██████╔╝██║ ╚═╝ ██║╚██████╔╝
-echo  ╚═════╝ ╚═╝     ╚═╝ ╚═════╝
+echo   ____  __  __  ___
+echo  ^|  _ \^|  \/  ^|/ _ \
+echo  ^| ^|_) ^| ^|\/^| ^| ^| ^| ^|
+echo  ^|  _ ^<^| ^|  ^| ^| ^|_^| ^|
+echo  ^|_^| \_\_^|  ^|_^|\___/
 echo.
-echo  ----------------------------------------
+echo  ========================================
 echo   Freund-Version wird gestartet...
-echo  ----------------------------------------
+echo  ========================================
 echo.
 
 cd /d "%~dp0"
 start "" "D:\python\Thonny\python.exe" bmo_web_freund.py
 
-echo   [OK]  BMO laeuft!
-echo   [OK]  Browser oeffnet sich gleich...
+echo   [ OK ]  BMO laeuft!
+echo   [ OK ]  Browser oeffnet sich gleich...
 echo.
-echo  ----------------------------------------
+echo  ========================================
 echo   Web: http://localhost:5000
-echo  ----------------------------------------
+echo  ========================================
 echo.
 timeout /t 4 /nobreak >nul

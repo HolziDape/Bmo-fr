@@ -1,26 +1,26 @@
 @echo off
+chcp 65001 >nul
 color 0B
 cls
 echo.
-echo  ██████╗ ███╗   ███╗ ██████╗
-echo  ██╔══██╗████╗ ████║██╔═══██╗
-echo  ██████╔╝██╔████╔██║██║   ██║
-echo  ██╔══██╗██║╚██╔╝██║██║   ██║
-echo  ██████╔╝██║ ╚═╝ ██║╚██████╔╝
-echo  ╚═════╝ ╚═╝     ╚═╝ ╚═════╝
+echo   ____  __  __  ___
+echo  ^|  _ \^|  \/  ^|/ _ \
+echo  ^| ^|_) ^| ^|\/^| ^| ^| ^| ^|
+echo  ^|  _ ^<^| ^|  ^| ^| ^|_^| ^|
+echo  ^|_^| \_\_^|  ^|_^|\___/
 echo.
-echo  ----------------------------------------
+echo  ========================================
 echo   Desktop-GUI wird gestartet...
-echo  ----------------------------------------
+echo  ========================================
 echo.
 
 cd /d "%~dp0"
 start "" "D:\python\Thonny\python.exe" "D:\python\scripts\Bmo\bmo_desktop.py"
 
-echo   [OK]  BMO Desktop laeuft!
+echo   [ OK ]  BMO Desktop laeuft!
 echo.
 echo   Sag  "Hey BMO"  um zu starten.
 echo.
-echo  ----------------------------------------
+echo  ========================================
 echo.
 timeout /t 4 /nobreak >nul
