@@ -14,7 +14,20 @@ echo   Core + Web werden gestartet...
 echo  ========================================
 echo.
 
-:: Gespeicherten Python-Pfad aus bmo_python.txt lesen (von SETUP_EINMALIG.bat gesetzt)
+:: Beim ersten Start Pakete installieren und Python-Pfad speichern
+if not exist "%~dp0..\bmo_python.txt" (
+    echo   Erster Start - Pakete werden installiert...
+    echo   (Dies kann einige Minuten dauern)
+    echo.
+    python -m pip install flask flask-cors requests psutil feedparser pillow pygame sounddevice soundfile speechrecognition openwakeword spotipy ollama
+    echo.
+    cd /d "%~dp0"
+    python -c "import sys; open('../bmo_python.txt','w').write(sys.executable)"
+    echo   [ OK ]  Setup abgeschlossen!
+    echo.
+)
+
+:: Gespeicherten Python-Pfad laden
 set "PYEXE="
 if exist "%~dp0..\bmo_python.txt" (
   set /p PYEXE=<"%~dp0..\bmo_python.txt"

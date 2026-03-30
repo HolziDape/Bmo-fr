@@ -1,0 +1,3 @@
+-beim freund web interface das die rvc Modell das eine stimme läd deaktivieren
+-besseren start also eine .bat die einmalig alles macht und dann es dem entsprechent in der read me ändern auf beiden bmo und bmo_f
+-in der read me schritt 4 raus nehmen und richtig erklären wie man schritt 2 macht also das du einen ordner per cmd öffnen musst
