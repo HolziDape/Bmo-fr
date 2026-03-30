@@ -15,7 +15,7 @@ echo  ========================================
 echo.
 
 wmic process where "name='pythonw.exe' and CommandLine like '%%bmo_%%'" delete >nul 2>&1
-taskkill /f /im pythonw.exe >nul 2>&1
+wmic process where "name='python.exe' and CommandLine like '%%bmo_%%'" delete >nul 2>&1
 
 echo   [ OK ]  Alle BMO Prozesse beendet.
 echo.
