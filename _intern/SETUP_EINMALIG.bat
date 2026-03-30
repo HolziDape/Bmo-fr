@@ -24,11 +24,12 @@ echo  ========================================
 echo   Python-Pfad wird gespeichert...
 echo  ========================================
 
-:: Python-Pfad in bmo_python.txt speichern damit bmo_start.bat den richtigen nutzt
-python -c "import sys; open('../bmo_python.txt','w').write(sys.executable)"
+:: pythonw.exe speichern (kein CMD-Fenster), fallback auf python.exe
+python -c "import sys,os; p=sys.executable; pw=os.path.join(os.path.dirname(p),'pythonw.exe'); open('../bmo_python.txt','w').write(pw if os.path.exists(pw) else p)"
 
 echo.
-for /f %%i in ('python -c "import sys; print(sys.executable)"') do echo   Python: %%i
+set /p PYEXE=<"%~dp0..\bmo_python.txt"
+echo   Python: %PYEXE%
 echo.
 echo  ========================================
 echo   [ OK ]  Setup abgeschlossen!

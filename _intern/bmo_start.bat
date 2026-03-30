@@ -22,7 +22,7 @@ if not exist "%~dp0..\bmo_python.txt" (
     python -m pip install flask flask-cors requests psutil feedparser pillow pygame sounddevice soundfile speechrecognition openwakeword spotipy ollama
     echo.
     cd /d "%~dp0"
-    python -c "import sys; open('../bmo_python.txt','w').write(sys.executable)"
+    python -c "import sys,os; p=sys.executable; pw=os.path.join(os.path.dirname(p),'pythonw.exe'); open('../bmo_python.txt','w').write(pw if os.path.exists(pw) else p)"
     echo   [ OK ]  Setup abgeschlossen!
     echo.
 )
