@@ -36,10 +36,18 @@ import threading
 import time as _time
 
 try:
-    from PIL import ImageGrab
-    _SCREEN_OK = True
+    import mss as _mss_lib
+    from PIL import Image as _PilImage
+    _SCREEN_OK      = True
+    _SCREEN_BACKEND = 'mss'
 except ImportError:
-    _SCREEN_OK = False
+    try:
+        from PIL import ImageGrab, Image as _PilImage
+        _SCREEN_OK      = True
+        _SCREEN_BACKEND = 'pil'
+    except ImportError:
+        _SCREEN_OK      = False
+        _SCREEN_BACKEND = None
 
 app  = Flask(__name__)
 CORS(app)
@@ -69,9 +77,26 @@ def _save_config(data: dict):
             f.write(f"{k}={v}\n")
     log.info("bmo_config.txt gespeichert.")
 
+def _parse_friends(raw: str) -> list:
+    """Parst 'Name|http://url,Name2|http://url2' in eine Liste von {name, url} Dicts."""
+    result = []
+    for entry in raw.split(','):
+        entry = entry.strip()
+        if not entry:
+            continue
+        if '|' in entry:
+            name, url = entry.split('|', 1)
+            result.append({'name': name.strip(), 'url': url.strip()})
+        elif entry.startswith('http'):
+            result.append({'name': 'Freund', 'url': entry})
+    return result
+
 _cfg           = _load_config()
 WEB_PASSWORD   = _cfg.get("WEB_PASSWORD", "").strip() or None
-FRIEND_URL     = _cfg.get("FRIEND_URL", "http://HIER_FREUND_IP:5000").strip()
+# Neue FRIENDS-Liste — fällt auf altes FRIEND_URL zurück
+_raw_friends   = _cfg.get("FRIENDS") or _cfg.get("FRIEND_URL", "")
+FRIENDS: list  = _parse_friends(_raw_friends)
+FRIEND_URL     = FRIENDS[0]['url'] if FRIENDS else "http://HIER_FREUND_IP:5000"
 app.secret_key = (WEB_PASSWORD or "bmo-setup-mode") + "-bmo-secret-42"
 
 def _save_password(pw: str):
@@ -80,11 +105,14 @@ def _save_password(pw: str):
     _save_config(cfg)
     log.info("Passwort in bmo_config.txt gespeichert.")
 
-def _save_friend_url(url: str):
+def _save_friends(friends_raw: str):
     cfg = _load_config()
-    cfg["FRIEND_URL"] = url
+    cfg["FRIENDS"] = friends_raw
     _save_config(cfg)
-    log.info(f"FRIEND_URL gespeichert: {url}")
+    log.info(f"FRIENDS gespeichert: {friends_raw}")
+
+def _save_friend_url(url: str):
+    _save_friends(url)
 
 
 # ── VERBINDUNGSCHECK ───────────────────────────────────────────────
@@ -370,7 +398,7 @@ def logout():
 @app.route('/setup', methods=['GET', 'POST'])
 def setup():
     """Ersteinrichtung — wird beim ersten Start angezeigt wenn noch kein Passwort gesetzt ist."""
-    global WEB_PASSWORD, FRIEND_URL
+    global WEB_PASSWORD, FRIEND_URL, FRIENDS
     if WEB_PASSWORD:
         return redirect(url_for('login'))
     error = None
@@ -386,6 +414,7 @@ def setup():
             _save_password(pw)
             if friend_url:
                 _save_friend_url(friend_url)
+                FRIENDS    = _parse_friends(friend_url)
                 FRIEND_URL = friend_url
             WEB_PASSWORD   = pw
             app.secret_key = pw + "-bmo-secret-42"
@@ -394,6 +423,42 @@ def setup():
             return redirect(url_for('index'))
     from flask import render_template_string
     return render_template_string(SETUP_HTML, error=error)
+
+# ── SETTINGS API ─────────────────────────────────────────────────
+@app.route('/api/settings', methods=['GET'])
+@login_required
+def get_settings():
+    cfg = _load_config()
+    return jsonify(friends=cfg.get('FRIENDS', ''))
+
+@app.route('/api/settings', methods=['POST'])
+@login_required
+def save_settings():
+    global WEB_PASSWORD, FRIENDS, FRIEND_URL
+    data = request.get_json(force=True)
+    changed = []
+
+    new_pw = (data.get('password') or '').strip()
+    if new_pw:
+        _save_password(new_pw)
+        WEB_PASSWORD   = new_pw
+        app.secret_key = new_pw + "-bmo-secret-42"
+        session['authenticated'] = True
+        changed.append('password')
+
+    new_friends = (data.get('friends') or '').strip()
+    if new_friends is not None:
+        _save_friends(new_friends)
+        FRIENDS    = _parse_friends(new_friends)
+        FRIEND_URL = FRIENDS[0]['url'] if FRIENDS else FRIEND_URL
+        changed.append('friends')
+
+    return jsonify(ok=True, changed=changed)
+
+@app.route('/api/friends', methods=['GET'])
+@login_required
+def list_friends():
+    return jsonify(friends=[{'idx': i, 'name': f['name']} for i, f in enumerate(FRIENDS)])
 
 # ── BMO ICON SVG ──────────────────────────────────────────────────
 BMO_SVG = '''<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 180 215">
@@ -1058,11 +1123,9 @@ HTML = """<!DOCTYPE html>
     <button class="qbtn" onclick="showScreen()" style="border-color:#0ea5e9;color:#38bdf8;">
       <span class="icon">🖥️</span>Screen
     </button>
-    <button class="qbtn friend" onclick="triggerFriendJumpscare()">
-      <span class="icon">👻</span>F.Scare
-    </button>
-    <button class="qbtn friend" onclick="showFriendScreen()">
-      <span class="icon">🖥️</span>F.Screen
+    <div id="friendBtns"></div>
+    <button class="qbtn" onclick="showSettings()" style="border-color:#475569;color:#94a3b8;">
+      <span class="icon">⚙️</span>Settings
     </button>
   </div>
 
@@ -1229,7 +1292,7 @@ HTML = """<!DOCTYPE html>
 <div class="overlay screen-overlay" id="friendScreenOverlay">
   <div class="screen-sheet" onclick="event.stopPropagation()">
     <div class="screen-header">
-      <span style="font-weight:600;font-size:15px;color:#fbbf24;">🖥️ Freund – Bildschirm Live</span>
+      <span id="friendScreenTitle" style="font-weight:600;font-size:15px;color:#fbbf24;">🖥️ Freund – Bildschirm Live</span>
       <div style="display:flex;gap:8px;align-items:center;">
         <span id="friendScreenStatus" style="font-size:11px;color:#64748b;"></span>
         <button onclick="closeFriendScreen()"
@@ -1239,6 +1302,27 @@ HTML = """<!DOCTYPE html>
       </div>
     </div>
     <img id="friendScreenImg" src="" alt="Freund Bildschirm wird geladen...">
+  </div>
+</div>
+
+<!-- SETTINGS OVERLAY -->
+<div class="overlay" id="settingsOverlay" onclick="closeOverlay('settingsOverlay')">
+  <div class="sheet" onclick="event.stopPropagation()">
+    <div class="sheet-handle"></div>
+    <h2>⚙️ Einstellungen</h2>
+    <div class="lbl" style="margin-top:12px;">Neues Passwort <span style="color:#555;font-weight:400;">(leer = keine Änderung)</span></div>
+    <input type="password" id="setPw" placeholder="Neues Passwort..." autocomplete="new-password"
+      style="width:100%;background:var(--bg3);border:1px solid var(--border);border-radius:12px;padding:11px 14px;color:var(--text);font-size:15px;outline:none;box-sizing:border-box;margin-top:6px;">
+    <div class="lbl" style="margin-top:14px;">Freunde <span style="color:#555;font-weight:400;">(Name|http://IP:5000, eine pro Zeile)</span></div>
+    <textarea id="setFriends" rows="4" placeholder="Alice|http://100.x.x.x:5000&#10;Bob|http://100.y.y.y:5000"
+      style="width:100%;background:var(--bg3);border:1px solid var(--border);border-radius:12px;padding:11px 14px;color:var(--text);font-size:14px;outline:none;box-sizing:border-box;margin-top:6px;resize:vertical;font-family:monospace;"></textarea>
+    <div id="settingsMsg" style="font-size:13px;color:#5eead4;min-height:18px;margin-top:8px;"></div>
+    <div style="display:flex;gap:8px;margin-top:14px;">
+      <button onclick="closeOverlay('settingsOverlay')"
+        style="flex:1;padding:12px;border-radius:12px;border:1px solid var(--border);background:none;color:var(--text-muted);cursor:pointer;font-size:14px;">Abbrechen</button>
+      <button onclick="saveSettings()"
+        style="flex:2;padding:12px;border-radius:12px;border:none;background:var(--green);color:#000;cursor:pointer;font-size:14px;font-weight:600;">Speichern</button>
+    </div>
   </div>
 </div>
 
@@ -1275,6 +1359,7 @@ async function updateStatus() {
 }
 updateStatus();
 setInterval(updateStatus, 5000);
+loadFriends();
 
 // ── TIMER ────────────────────────────────────────────────────────
 let _knownTimers = {};  // id → {label, duration} für Abschluss-Erkennung
@@ -1427,35 +1512,99 @@ async function triggerJumpscare() {
   }
 }
 
-// ── FREUND AKTIONEN ──────────────────────────────────────────────
-async function triggerFriendJumpscare() {
+// ── FREUNDE (dynamisch) ──────────────────────────────────────────
+let _friends = [];
+
+async function loadFriends() {
   try {
-    const r = await fetch('/api/friend/jumpscare', {method: 'POST'});
+    const r = await fetch('/api/friends');
     const d = await r.json();
-    if (d.ok) {
-      addMsg('👻 Jumpscare an Freund gesendet!', 'sys');
-    } else {
-      addMsg('⛔ Freund hat Admin-Zugriff nicht aktiviert.', 'sys');
-    }
+    _friends = d.friends || [];
+    renderFriendButtons();
+  } catch(e) {}
+}
+
+function renderFriendButtons() {
+  const container = document.getElementById('friendBtns');
+  container.innerHTML = '';
+  _friends.forEach(f => {
+    const s = document.createElement('button');
+    s.className = 'qbtn friend';
+    s.innerHTML = `<span class="icon">👻</span>${f.name}`;
+    s.onclick = () => triggerFriendJumpscare(f.idx, f.name);
+    container.appendChild(s);
+    const sc = document.createElement('button');
+    sc.className = 'qbtn friend';
+    sc.innerHTML = `<span class="icon">🖥️</span>${f.name}`;
+    sc.onclick = () => showFriendScreen(f.idx, f.name);
+    container.appendChild(sc);
+  });
+}
+
+async function triggerFriendJumpscare(idx, name) {
+  try {
+    const r = await fetch(`/api/friend/${idx}/jumpscare`, {method: 'POST'});
+    const d = await r.json();
+    addMsg(d.ok ? `👻 Jumpscare an ${name} gesendet!` : `⛔ ${name}: ${d.error || 'Admin-Zugriff nicht aktiviert.'}`, 'sys');
   } catch(e) {
-    addMsg('Freund nicht erreichbar 😢', 'sys');
+    addMsg(`${name} nicht erreichbar 😢`, 'sys');
   }
 }
 
 let _friendScreenActive = false;
-function showFriendScreen() {
+function showFriendScreen(idx, name) {
   _friendScreenActive = true;
+  document.getElementById('friendScreenTitle').textContent = `🖥️ ${name} – Bildschirm Live`;
   document.getElementById('friendScreenStatus').textContent = 'Verbinde...';
   document.getElementById('friendScreenOverlay').classList.add('show');
   const img = document.getElementById('friendScreenImg');
-  img.src = '/api/friend/screen?' + Date.now();
-  img.onload = () => { document.getElementById('friendScreenStatus').textContent = 'Live'; };
+  img.src = `/api/friend/${idx}/screen?` + Date.now();
+  img.onload  = () => { document.getElementById('friendScreenStatus').textContent = 'Live'; };
   img.onerror = () => { document.getElementById('friendScreenStatus').textContent = '⛔ Kein Zugriff'; img.src = ''; };
 }
 function closeFriendScreen() {
   _friendScreenActive = false;
   document.getElementById('friendScreenOverlay').classList.remove('show');
   setTimeout(() => { if (!_friendScreenActive) document.getElementById('friendScreenImg').src = ''; }, 300);
+}
+
+// ── SETTINGS ─────────────────────────────────────────────────────
+async function showSettings() {
+  try {
+    const r = await fetch('/api/settings');
+    const d = await r.json();
+    document.getElementById('setFriends').value =
+      (d.friends || '').split(',').map(s => s.trim()).filter(Boolean).join('\n');
+  } catch(e) {}
+  document.getElementById('setPw').value = '';
+  document.getElementById('settingsMsg').style.color = '#5eead4';
+  document.getElementById('settingsMsg').textContent = '';
+  document.getElementById('settingsOverlay').classList.add('show');
+}
+
+async function saveSettings() {
+  const pw      = document.getElementById('setPw').value.trim();
+  const friends = document.getElementById('setFriends').value
+                    .split('\n').map(s => s.trim()).filter(Boolean).join(',');
+  const msg = document.getElementById('settingsMsg');
+  msg.textContent = 'Speichere...';
+  try {
+    const r = await fetch('/api/settings', {
+      method: 'POST',
+      headers: {'Content-Type':'application/json'},
+      body: JSON.stringify({password: pw, friends})
+    });
+    const d = await r.json();
+    if (d.ok) {
+      msg.textContent = 'Gespeichert ✓';
+      await loadFriends();
+      setTimeout(() => closeOverlay('settingsOverlay'), 800);
+    } else {
+      msg.style.color = '#fca5a5'; msg.textContent = 'Fehler';
+    }
+  } catch(e) {
+    msg.style.color = '#fca5a5'; msg.textContent = 'Verbindungsfehler';
+  }
 }
 
 // ── SPOTIFY ─────────────────────────────────────────────────────
@@ -1994,29 +2143,51 @@ def commands_list():
     return jsonify(commands=COMMANDS)
 
 # ── SCREEN STREAMING ──────────────────────────────────────────────
-_screen_lock = threading.Lock()
+_latest_frame: bytes | None = None
+_frame_lock = threading.Lock()
 
-def _screen_generator():
-    """MJPEG-Generator: streamt den Desktop als ca. 10 FPS JPEG-Stream."""
+def _capture_daemon():
+    """Hintergrund-Thread: erfasst Desktop so schnell wie möglich (~15 FPS) mit mss."""
+    global _latest_frame
+    target_interval = 1.0 / 15
+    if _SCREEN_BACKEND == 'mss':
+        sct = _mss_lib.mss()
     while True:
-        if not _SCREEN_OK:
-            break
+        t0 = _time.monotonic()
         try:
-            with _screen_lock:
+            if _SCREEN_BACKEND == 'mss':
+                monitor = sct.monitors[0]
+                raw = sct.grab(monitor)
+                img = _PilImage.frombytes('RGB', raw.size, raw.bgra, 'raw', 'BGRX')
+            else:
                 img = ImageGrab.grab()
-            # Auf max. 1280px Breite skalieren
             w, h = img.size
-            new_w = min(w, 1280)
-            new_h = int(h * new_w / w)
-            if (new_w, new_h) != (w, h):
-                img = img.resize((new_w, new_h))
+            nw = min(w, 1280)
+            nh = int(h * nw / w)
+            if (nw, nh) != (w, h):
+                img = img.resize((nw, nh), _PilImage.BILINEAR)
             buf = io.BytesIO()
-            img.save(buf, format='JPEG', quality=55)
-            frame = buf.getvalue()
-            yield (b'--frame\r\nContent-Type: image/jpeg\r\n\r\n' + frame + b'\r\n')
+            img.save(buf, format='JPEG', quality=60, optimize=False)
+            with _frame_lock:
+                _latest_frame = buf.getvalue()
         except Exception:
             pass
-        _time.sleep(0.1)   # max. 10 FPS
+        elapsed = _time.monotonic() - t0
+        wait = target_interval - elapsed
+        if wait > 0:
+            _time.sleep(wait)
+
+if _SCREEN_OK:
+    threading.Thread(target=_capture_daemon, daemon=True).start()
+
+def _screen_generator():
+    """MJPEG-Generator: liefert den zuletzt erfassten Frame mit ~15 FPS."""
+    while True:
+        with _frame_lock:
+            frame = _latest_frame
+        if frame:
+            yield (b'--frame\r\nContent-Type: image/jpeg\r\n\r\n' + frame + b'\r\n')
+        _time.sleep(0.067)
 
 @app.route('/api/screen')
 @login_required
@@ -2028,26 +2199,28 @@ def screen_stream():
 
 # ── FREUND PROXY ROUTEN ────────────────────────────────────────────
 
-@app.route('/api/friend/jumpscare', methods=['POST'])
+@app.route('/api/friend/<int:idx>/jumpscare', methods=['POST'])
 @login_required
-def friend_jumpscare():
-    """Sendet Jumpscare an Freund (nur wenn Freund Admin-Zugriff aktiviert hat)."""
-    if "HIER_FREUND_IP" in FRIEND_URL:
-        return jsonify(ok=False, error="FRIEND_URL nicht konfiguriert.")
+def friend_jumpscare(idx):
+    """Sendet Jumpscare an Freund idx."""
+    if idx >= len(FRIENDS):
+        return jsonify(ok=False, error="Unbekannter Freund."), 404
+    url = FRIENDS[idx]['url']
     try:
-        r = req.post(f"{FRIEND_URL}/api/admin/jumpscare", timeout=5)
+        r = req.post(f"{url}/api/admin/jumpscare", timeout=5)
         return jsonify(r.json())
     except Exception as e:
         return jsonify(ok=False, error=str(e))
 
-@app.route('/api/friend/screen')
+@app.route('/api/friend/<int:idx>/screen')
 @login_required
-def friend_screen():
-    """Streamt den Bildschirm des Freundes (nur wenn Freund Admin-Zugriff aktiviert hat)."""
-    if "HIER_FREUND_IP" in FRIEND_URL:
-        return jsonify(error="FRIEND_URL nicht konfiguriert."), 503
+def friend_screen(idx):
+    """Streamt den Bildschirm von Freund idx."""
+    if idx >= len(FRIENDS):
+        return jsonify(error="Unbekannter Freund."), 404
+    url = FRIENDS[idx]['url']
     try:
-        r = req.get(f"{FRIEND_URL}/api/admin/screen", stream=True, timeout=10)
+        r = req.get(f"{url}/api/admin/screen", stream=True, timeout=10)
         if r.status_code == 403:
             return jsonify(error="Freund hat Zugriff nicht erlaubt."), 403
         return Response(

@@ -549,10 +549,18 @@ def do_jumpscare():
 
 # ── KERNFUNKTION: Text → Antwort ───────────────────────────────────────────
 
-def process_text(text: str) -> tuple:
+# Aktionen die NUR lokal ausgeführt werden dürfen (nicht für Remote-Anfragen vom Freund)
+_REMOTE_SKIP = {
+    "shutdown_pc", "set_timer", "open_app", "take_screenshot",
+    "spotify_play", "spotify_pause", "spotify_resume", "spotify_next",
+    "spotify_playlist", "spotify_volume", "spotify_volume_up", "spotify_volume_down",
+}
+
+def process_text(text: str, remote: bool = False) -> tuple:
     """
     Schickt Text an Ollama (mit Gesprächskontext), erkennt Aktionen,
-    gibt (antwort, action) zurück.
+    gibt (antwort, action, action_params) zurück.
+    Bei remote=True werden lokale Aktionen nicht ausgeführt.
     """
     global _conversation_history
 
@@ -564,10 +572,11 @@ def process_text(text: str) -> tuple:
         response = ollama.chat(model=OLLAMA_MODEL, messages=messages)
         content  = response['message']['content']
     except Exception as e:
-        return f"Ollama ist gerade nicht erreichbar: {e}", None
+        return f"Ollama ist gerade nicht erreichbar: {e}", None, {}
 
-    result_text = content
-    action_name = None
+    result_text   = content
+    action_name   = None
+    action_params = {}
 
     if "{" in content and "action" in content:
         try:
@@ -575,7 +584,10 @@ def process_text(text: str) -> tuple:
             end    = content.rfind('}') + 1
             data   = json.loads(content[start:end])
             action = data.get("action", "")
-            action_name = action
+            action_name   = action
+            action_params = data
+
+            skip = remote and action in _REMOTE_SKIP
 
             if action == "get_time":
                 result_text = f"Es ist jetzt {datetime.datetime.now().strftime('%H:%M')} Uhr."
@@ -591,30 +603,31 @@ def process_text(text: str) -> tuple:
                 city = data.get("location", "Berlin")
                 result_text = f"In {city} ist es aktuell {get_weather(city)}."
             elif action == "shutdown_pc":
-                threading.Thread(target=shutdown_pc, daemon=True).start()
+                if not skip:
+                    threading.Thread(target=shutdown_pc, daemon=True).start()
                 result_text = "Okay, ich fahre jetzt herunter. Tschüss!"
             elif action == "spotify_play":
-                result_text = spotify_play(data.get("query", ""))
+                result_text = "Musik wird gestartet!" if skip else spotify_play(data.get("query", ""))
             elif action == "spotify_pause":
-                result_text = spotify_pause()
+                result_text = "Musik pausiert!" if skip else spotify_pause()
             elif action == "spotify_resume":
-                result_text = spotify_resume()
+                result_text = "Musik wird fortgesetzt!" if skip else spotify_resume()
             elif action == "spotify_next":
-                result_text = spotify_next()
+                result_text = "Nächstes Lied!" if skip else spotify_next()
             elif action == "spotify_playlist":
-                result_text = spotify_playlist()
+                result_text = "Playlist wird gestartet!" if skip else spotify_playlist()
             elif action == "spotify_volume":
-                result_text = spotify_volume(data.get("level", 50))
+                result_text = f"Lautstärke auf {data.get('level', 50)}%!" if skip else spotify_volume(data.get("level", 50))
             elif action == "spotify_volume_up":
-                result_text = spotify_volume_up()
+                result_text = "Lauter!" if skip else spotify_volume_up()
             elif action == "spotify_volume_down":
-                result_text = spotify_volume_down()
+                result_text = "Leiser!" if skip else spotify_volume_down()
             elif action == "set_timer":
-                result_text = set_timer(data.get("minutes", 5), data.get("label", ""))
+                result_text = f"Timer für {data.get('minutes', 5)} Minuten gesetzt!" if skip else set_timer(data.get("minutes", 5), data.get("label", ""))
             elif action == "open_app":
-                result_text = open_app(data.get("name", ""))
+                result_text = f"App wird geöffnet!" if skip else open_app(data.get("name", ""))
             elif action == "take_screenshot":
-                result_text = take_screenshot()
+                result_text = "Screenshot wird gemacht!" if skip else take_screenshot()
         except json.JSONDecodeError:
             pass
 
@@ -624,7 +637,7 @@ def process_text(text: str) -> tuple:
     if len(_conversation_history) > MAX_HISTORY * 2:
         _conversation_history = _conversation_history[-(MAX_HISTORY * 2):]
 
-    return result_text, action_name
+    return result_text, action_name, action_params
 
 # ── ROUTES ─────────────────────────────────────────────────────────────────
 
@@ -653,11 +666,12 @@ def route_process():
     """Hauptendpunkt: Text rein → Antwort + action raus."""
     data = request.json or {}
     text = (data.get('message') or data.get('text') or '').strip()
+    remote = bool(data.get('remote', False))
     if not text:
         return jsonify(response="Ich habe nichts verstanden.", action=None)
-    response, action = process_text(text)
+    response, action, action_params = process_text(text, remote=remote)
     save_conversation(text, response)
-    return jsonify(response=response, action=action)
+    return jsonify(response=response, action=action, action_params=action_params)
 
 
 @app.route('/transcribe', methods=['POST'])
@@ -703,8 +717,9 @@ def route_transcribe():
     if not transcript:
         return jsonify(transcript='', response='Ich habe dich nicht verstanden.', action=None)
 
-    response, action = process_text(transcript)
-    return jsonify(transcript=transcript, response=response, action=action)
+    remote = bool(data.get('remote', False))
+    response, action, action_params = process_text(transcript, remote=remote)
+    return jsonify(transcript=transcript, response=response, action=action, action_params=action_params)
 
 
 @app.route('/speak', methods=['POST'])
