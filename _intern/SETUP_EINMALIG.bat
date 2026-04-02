@@ -24,8 +24,10 @@ echo  ========================================
 echo   Python-Pfad wird gespeichert...
 echo  ========================================
 
-:: pythonw.exe speichern (kein CMD-Fenster), fallback auf python.exe
-python -c "import sys,os; p=sys.executable; pw=os.path.join(os.path.dirname(p),'pythonw.exe'); open('../bmo_python.txt','w').write(pw if os.path.exists(pw) else p)"
+:: pythonw.exe speichern — nur schreiben wenn bmo_python.txt noch nicht existiert
+if not exist "%~dp0..\bmo_python.txt" (
+    python -c "import sys,os; p=sys.executable; pw=os.path.join(os.path.dirname(p),'pythonw.exe'); open('../bmo_python.txt','w').write(pw if os.path.exists(pw) else p)"
+)
 
 echo.
 set /p PYEXE=<"%~dp0..\bmo_python.txt"
