@@ -1574,7 +1574,7 @@ async function showSettings() {
     const r = await fetch('/api/settings');
     const d = await r.json();
     document.getElementById('setFriends').value =
-      (d.friends || '').split(',').map(s => s.trim()).filter(Boolean).join('\n');
+      (d.friends || '').split(',').map(s => s.trim()).filter(Boolean).join('\\n');
   } catch(e) {}
   document.getElementById('setPw').value = '';
   document.getElementById('settingsMsg').style.color = '#5eead4';
@@ -1585,7 +1585,7 @@ async function showSettings() {
 async function saveSettings() {
   const pw      = document.getElementById('setPw').value.trim();
   const friends = document.getElementById('setFriends').value
-                    .split('\n').map(s => s.trim()).filter(Boolean).join(',');
+                    .split('\\n').map(s => s.trim()).filter(Boolean).join(',');
   const msg = document.getElementById('settingsMsg');
   msg.textContent = 'Speichere...';
   try {
