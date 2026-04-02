@@ -14,8 +14,9 @@ echo   Desktop-GUI wird gestartet...
 echo  ========================================
 echo.
 
-cd /d "%~dp0"
-start "" python "%~dp0..\bmo_desktop.py"
+cd /d "%~dp0.."
+set /p PYEXE=<"%~dp0..\bmo_python.txt"
+start "" "%PYEXE%" "%~dp0..\bmo_desktop.py"
 
 echo   [ OK ]  BMO Desktop laeuft!
 echo.
