@@ -1592,15 +1592,42 @@ function renderFriendsList() {
   }
   _friends.forEach(f => {
     const row = document.createElement('div');
-    row.style.cssText = 'display:flex;gap:8px;align-items:center;margin-bottom:10px;';
+    row.style.cssText = 'display:flex;gap:8px;align-items:center;margin-bottom:12px;padding:10px 12px;background:var(--bg3);border:1px solid var(--border);border-radius:14px;';
+    row.id = `friendRow_${f.idx}`;
     row.innerHTML = `
-      <span style="flex:1;font-size:15px;font-weight:600;">${f.name}</span>
-      <button onclick="triggerFriendJumpscare(${f.idx},'${f.name}')"
-        style="padding:10px 14px;background:var(--bg3);border:1px solid #f59e0b;border-radius:12px;color:#fbbf24;font-size:13px;cursor:pointer;">👻 Scare</button>
-      <button onclick="closeOverlay('friendsOverlay');showFriendScreen(${f.idx},'${f.name}')"
-        style="padding:10px 14px;background:var(--bg3);border:1px solid #0ea5e9;border-radius:12px;color:#38bdf8;font-size:13px;cursor:pointer;">🖥️ Screen</button>`;
+      <div style="flex:1;min-width:0;">
+        <div style="font-size:15px;font-weight:600;">${f.name}</div>
+        <div id="friendStatus_${f.idx}" style="font-size:12px;color:var(--text2);margin-top:2px;">⏳ Prüfe...</div>
+      </div>
+      <button onclick="triggerFriendJumpscare(${f.idx},'${f.name}')" id="friendScareBtn_${f.idx}"
+        style="padding:8px 12px;background:var(--bg3);border:1px solid #f59e0b;border-radius:10px;color:#fbbf24;font-size:13px;cursor:pointer;opacity:.4;" disabled>👻</button>
+      <button onclick="closeOverlay('friendsOverlay');showFriendScreen(${f.idx},'${f.name}')" id="friendScreenBtn_${f.idx}"
+        style="padding:8px 12px;background:var(--bg3);border:1px solid #0ea5e9;border-radius:10px;color:#38bdf8;font-size:13px;cursor:pointer;opacity:.4;" disabled>🖥️</button>`;
     list.appendChild(row);
+    fetchFriendInfo(f.idx);
   });
+}
+
+async function fetchFriendInfo(idx) {
+  const statusEl = document.getElementById(`friendStatus_${idx}`);
+  const scareBtn = document.getElementById(`friendScareBtn_${idx}`);
+  const screenBtn = document.getElementById(`friendScreenBtn_${idx}`);
+  try {
+    const r = await fetch(`/api/friend/${idx}/info`);
+    const d = await r.json();
+    if (!d.online) {
+      statusEl.innerHTML = '<span style="color:#ef4444;">● Offline</span>';
+      return;
+    }
+    const adminTxt = d.admin_access
+      ? '<span style="color:#4ade80;">✓ Admin-Zugriff aktiv</span>'
+      : '<span style="color:#94a3b8;">✗ Admin-Zugriff gesperrt</span>';
+    statusEl.innerHTML = '<span style="color:#4ade80;">● Online</span> · ' + adminTxt;
+    scareBtn.disabled = false; scareBtn.style.opacity = '1';
+    if (d.admin_access) { screenBtn.disabled = false; screenBtn.style.opacity = '1'; }
+  } catch(e) {
+    statusEl.innerHTML = '<span style="color:#ef4444;">● Offline</span>';
+  }
 }
 
 function showFriends() {
@@ -2408,6 +2435,19 @@ def screen_stream():
                     mimetype='multipart/x-mixed-replace; boundary=frame')
 
 # ── FREUND PROXY ROUTEN ────────────────────────────────────────────
+
+@app.route('/api/friend/<int:idx>/info')
+@login_required
+def friend_info(idx):
+    """Prüft ob Freund online ist und ob Admin-Zugriff aktiv."""
+    if idx >= len(FRIENDS):
+        return jsonify(online=False, admin_access=False), 404
+    url = FRIENDS[idx]['url']
+    try:
+        r = req.get(f"{url}/api/admin/info", timeout=3)
+        return jsonify(r.json())
+    except Exception:
+        return jsonify(online=False, admin_access=False)
 
 @app.route('/api/friend/<int:idx>/jumpscare', methods=['POST'])
 @login_required
