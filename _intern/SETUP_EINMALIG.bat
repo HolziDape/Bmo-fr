@@ -25,7 +25,7 @@ echo   Python-Pfad wird gespeichert...
 echo  ========================================
 
 :: Python-Pfad in bmo_python.txt speichern damit bmo_start.bat den richtigen nutzt
-python -c "import sys; open('../bmo_python.txt','w').write(sys.executable)"
+python -c "import sys; open('bmo_python.txt','w').write(sys.executable)"
 
 echo.
 for /f %%i in ('python -c "import sys; print(sys.executable)"') do echo   Python: %%i

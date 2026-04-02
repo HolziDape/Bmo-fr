@@ -16,8 +16,8 @@ echo.
 
 :: Gespeicherten Python-Pfad aus bmo_python.txt lesen (von SETUP_EINMALIG.bat gesetzt)
 set "PYEXE="
-if exist "%~dp0..\bmo_python.txt" (
-  set /p PYEXE=<"%~dp0..\bmo_python.txt"
+if exist "%~dp0bmo_python.txt" (
+  set /p PYEXE=<"%~dp0bmo_python.txt"
 )
 
 :: Falls kein gespeicherter Pfad, pythonw aus PATH versuchen

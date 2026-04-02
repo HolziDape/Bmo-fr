@@ -48,7 +48,7 @@ PORT       = 5000
 CORE_URL   = "http://localhost:6000"
 
 # ── KONFIGURATION (aus bmo_config.txt) ────────────────────────────
-_CONFIG_PATH = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "bmo_config.txt")
+_CONFIG_PATH = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "_intern", "bmo_config.txt")
 
 def _load_config():
     """Liest alle Schlüssel aus bmo_config.txt als Dict."""

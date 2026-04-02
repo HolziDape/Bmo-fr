@@ -80,7 +80,7 @@ CONVERSATIONS_PATH = os.path.join(BASE_DIR, "_intern", "data",   "conversations.
 SPOTIFY_CLIENT_ID     = "365b371ad2c7483ea7dda2029869c3a3"
 SPOTIFY_CLIENT_SECRET = "2c6b2968fbb9425792b99355b03b65ac"
 SPOTIFY_REDIRECT_URI  = "http://127.0.0.1:8888/callback"
-SPOTIFY_CACHE_PATH    = os.path.join(BASE_DIR, ".spotify_cache")
+SPOTIFY_CACHE_PATH    = os.path.join(BASE_DIR, "_intern", ".spotify_cache")
 
 SPOTIFY_PLAYLIST_ID = "1CQx19s0ib50fjgxM47FXY"
 

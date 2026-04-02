@@ -1,10 +1,16 @@
 /openWakeWord
 
 # Lokale Konfiguration — nicht ins Repo
+_intern/bmo_config.txt
+_intern/bmo_python.txt
+_intern/.spotify_cache
+freund/.spotify_cache
+
+# Alte Root-Dateien (werden nicht mehr erstellt)
 bmo_config.txt
 bmo_python.txt
-freund/.spotify_cache
 .spotify_cache
+git
 
 # Logs & Runtime
 _intern/logs/
