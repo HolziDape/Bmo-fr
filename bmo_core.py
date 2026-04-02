@@ -747,37 +747,46 @@ def route_speak():
         return jsonify(audio=None, error=str(e))
 
 
-@app.route('/status', methods=['GET'])
-def route_status():
-    """Systemstatus für Status-Karten in beiden Interfaces."""
-    cpu  = psutil.cpu_percent(interval=0.5)
-    ram  = psutil.virtual_memory().percent
-    zeit = datetime.datetime.now().strftime('%H:%M')
+_gpu_cache = {"load": None, "mem": None}
+_gpu_cache_lock = threading.Lock()
 
-    # GPU via wmi (AMD-kompatibel)
-    gpu_load = None
-    gpu_mem  = None   # FIX: immer initialisieren, sonst UnboundLocalError
-    try:
-        import wmi
-        w = wmi.WMI(namespace="root\OpenHardwareMonitor")
-        sensors = w.Sensor()
-        for s in sensors:
-            if s.SensorType == "Load" and "GPU" in s.Name:
-                gpu_load = f"{s.Value:.0f}%"
-            if s.SensorType == "SmallData" and "GPU" in s.Name and "Memory Used" in s.Name:
-                gpu_mem = f"{s.Value:.0f}MB"
-    except:
-        # Fallback: wmi ohne OpenHardwareMonitor
+def _refresh_gpu():
+    """Hintergrund-Thread: GPU-Info alle 30s via WMI aktualisieren."""
+    while True:
+        load, mem = None, None
         try:
             import wmi
-            w = wmi.WMI()
-            for gpu in w.Win32_VideoController():
-                if gpu.Name:
-                    gpu_load = gpu.Name.split()[0]  # nur GPU-Name als Fallback
-                    break
+            w = wmi.WMI(namespace=r"root\OpenHardwareMonitor")
+            for s in w.Sensor():
+                if s.SensorType == "Load" and "GPU" in s.Name:
+                    load = f"{s.Value:.0f}%"
+                if s.SensorType == "SmallData" and "GPU" in s.Name and "Memory Used" in s.Name:
+                    mem = f"{s.Value:.0f}MB"
         except:
-            pass
+            try:
+                import wmi
+                for gpu in wmi.WMI().Win32_VideoController():
+                    if gpu.Name:
+                        load = gpu.Name.split()[0]
+                        break
+            except:
+                pass
+        with _gpu_cache_lock:
+            _gpu_cache["load"] = load
+            _gpu_cache["mem"]  = mem
+        time.sleep(30)
 
+threading.Thread(target=_refresh_gpu, daemon=True).start()
+
+@app.route('/status', methods=['GET'])
+def route_status():
+    """Systemstatus — sofort, GPU aus Cache."""
+    cpu  = psutil.cpu_percent()
+    ram  = psutil.virtual_memory().percent
+    zeit = datetime.datetime.now().strftime('%H:%M')
+    with _gpu_cache_lock:
+        gpu_load = _gpu_cache["load"]
+        gpu_mem  = _gpu_cache["mem"]
     return jsonify(cpu=cpu, ram=ram, time=zeit, gpu=gpu_load, gpu_mem=gpu_mem)
 
 
