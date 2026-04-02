@@ -458,7 +458,7 @@ def save_settings():
 @app.route('/api/friends', methods=['GET'])
 @login_required
 def list_friends():
-    return jsonify(friends=[{'idx': i, 'name': f['name']} for i, f in enumerate(FRIENDS)])
+    return jsonify(friends=[{'idx': i, 'name': f['name'], 'url': f['url']} for i, f in enumerate(FRIENDS)])
 
 # ── BMO ICON SVG ──────────────────────────────────────────────────
 BMO_SVG = '''<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 180 215">
@@ -1229,7 +1229,20 @@ HTML = """<!DOCTYPE html>
 <div class="overlay" id="friendsOverlay" onclick="closeOverlay('friendsOverlay')">
   <div class="sheet" onclick="event.stopPropagation()">
     <div class="sheet-handle"></div>
-    <h2>👥 Freunde</h2>
+    <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:14px;">
+      <h2 style="margin:0;">👥 Freunde</h2>
+      <button onclick="toggleFriendsEdit()"
+        style="background:none;border:1px solid var(--border);border-radius:10px;color:var(--text2);padding:6px 12px;cursor:pointer;font-size:13px;">✏️ Bearbeiten</button>
+    </div>
+    <!-- Edit-Bereich (standardmäßig versteckt) -->
+    <div id="friendsEditArea" style="display:none;margin-bottom:16px;">
+      <div style="font-size:13px;color:var(--text2);margin-bottom:6px;">Name|http://IP:5000 — eine pro Zeile</div>
+      <textarea id="friendsEditInput" rows="4" placeholder="Alice|http://100.x.x.x:5000&#10;Bob|http://100.y.y.y:5000"
+        style="width:100%;background:var(--bg3);border:1px solid var(--border);border-radius:12px;padding:11px 14px;color:var(--text);font-size:14px;outline:none;box-sizing:border-box;resize:vertical;font-family:monospace;"></textarea>
+      <div id="friendsEditMsg" style="font-size:13px;color:#5eead4;min-height:16px;margin-top:4px;"></div>
+      <button onclick="saveFriendsEdit()"
+        style="width:100%;margin-top:8px;padding:12px;background:var(--green);border:none;border-radius:12px;color:#000;font-size:14px;font-weight:600;cursor:pointer;">Speichern</button>
+    </div>
     <button onclick="scareAll()"
       style="width:100%;padding:14px;background:#f59e0b;border:none;border-radius:14px;color:#000;font-size:15px;font-weight:700;cursor:pointer;margin-bottom:16px;">
       👻 Alle gleichzeitig schrecken
@@ -1294,13 +1307,15 @@ HTML = """<!DOCTYPE html>
       <span style="font-weight:600;font-size:15px;color:#e2e8f0;">🖥️ Bildschirm Live</span>
       <div style="display:flex;gap:8px;align-items:center;">
         <span id="screenFps" style="font-size:11px;color:#64748b;"></span>
+        <button onclick="toggleFullscreen('screenImg')"
+          style="background:none;border:1px solid #334155;border-radius:8px;color:#94a3b8;padding:5px 12px;cursor:pointer;font-size:13px;">⛶ Vollbild</button>
         <button onclick="closeScreen()"
           style="background:none;border:1px solid #334155;border-radius:8px;color:#94a3b8;padding:5px 12px;cursor:pointer;font-size:13px;">
           ✕ Schließen
         </button>
       </div>
     </div>
-    <img id="screenImg" src="" alt="Bildschirm wird geladen...">
+    <img id="screenImg" src="" alt="Bildschirm wird geladen..." ondblclick="toggleFullscreen('screenImg')">
   </div>
 </div>
 
@@ -1311,13 +1326,15 @@ HTML = """<!DOCTYPE html>
       <span id="friendScreenTitle" style="font-weight:600;font-size:15px;color:#fbbf24;">🖥️ Freund – Bildschirm Live</span>
       <div style="display:flex;gap:8px;align-items:center;">
         <span id="friendScreenStatus" style="font-size:11px;color:#64748b;"></span>
+        <button onclick="toggleFullscreen('friendScreenImg')"
+          style="background:none;border:1px solid #334155;border-radius:8px;color:#94a3b8;padding:5px 12px;cursor:pointer;font-size:13px;">⛶ Vollbild</button>
         <button onclick="closeFriendScreen()"
           style="background:none;border:1px solid #334155;border-radius:8px;color:#94a3b8;padding:5px 12px;cursor:pointer;font-size:13px;">
           ✕ Schließen
         </button>
       </div>
     </div>
-    <img id="friendScreenImg" src="" alt="Freund Bildschirm wird geladen...">
+    <img id="friendScreenImg" src="" alt="Freund Bildschirm wird geladen..." ondblclick="toggleFullscreen('friendScreenImg')">
   </div>
 </div>
 
@@ -1562,7 +1579,57 @@ function renderFriendsList() {
 
 function showFriends() {
   renderFriendsList();
+  document.getElementById('friendsEditArea').style.display = 'none';
   document.getElementById('friendsOverlay').classList.add('show');
+}
+
+function toggleFriendsEdit() {
+  const area = document.getElementById('friendsEditArea');
+  const open = area.style.display !== 'none';
+  if (open) {
+    area.style.display = 'none';
+  } else {
+    document.getElementById('friendsEditInput').value =
+      (_friends.map(f => f.name + '|' + (f.url || '')).join('\\n'));
+    document.getElementById('friendsEditMsg').textContent = '';
+    area.style.display = '';
+  }
+}
+
+async function saveFriendsEdit() {
+  const raw = document.getElementById('friendsEditInput').value
+                .split('\\n').map(s => s.trim()).filter(Boolean).join(',');
+  const msg = document.getElementById('friendsEditMsg');
+  msg.textContent = 'Speichere...';
+  try {
+    const r = await fetch('/api/settings', {
+      method: 'POST',
+      headers: {'Content-Type':'application/json'},
+      body: JSON.stringify({friends: raw})
+    });
+    const d = await r.json();
+    if (d.ok) {
+      msg.textContent = 'Gespeichert ✓';
+      await loadFriends();
+      renderFriendsList();
+      setTimeout(() => { document.getElementById('friendsEditArea').style.display = 'none'; }, 800);
+    } else {
+      msg.style.color = '#f87171';
+      msg.textContent = 'Fehler beim Speichern.';
+    }
+  } catch(e) {
+    msg.style.color = '#f87171';
+    msg.textContent = 'Verbindungsfehler.';
+  }
+}
+
+function toggleFullscreen(imgId) {
+  const el = document.getElementById(imgId);
+  if (!document.fullscreenElement) {
+    el.requestFullscreen && el.requestFullscreen();
+  } else {
+    document.exitFullscreen && document.exitFullscreen();
+  }
 }
 
 async function triggerFriendJumpscare(idx, name) {
@@ -2198,12 +2265,12 @@ def _capture_daemon():
             else:
                 img = ImageGrab.grab()
             w, h = img.size
-            nw = min(w, 1280)
+            nw = min(w, 1920)
             nh = int(h * nw / w)
             if (nw, nh) != (w, h):
                 img = img.resize((nw, nh), _PilImage.BILINEAR)
             buf = io.BytesIO()
-            img.save(buf, format='JPEG', quality=60, optimize=False)
+            img.save(buf, format='JPEG', quality=82, optimize=False)
             with _frame_lock:
                 _latest_frame = buf.getvalue()
         except Exception:
