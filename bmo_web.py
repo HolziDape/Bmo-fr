@@ -1335,6 +1335,7 @@ HTML = """<!DOCTYPE html>
         </button>
       </div>
     </div>
+    <div id="friendMonitorPicker" style="display:flex;gap:6px;padding:6px 0 2px;flex-wrap:wrap;"></div>
     <img id="friendScreenImg" src="" alt="Freund Bildschirm wird geladen..." ondblclick="toggleFullscreen('friendScreenImg')">
   </div>
 </div>
@@ -1675,16 +1676,46 @@ async function scareAll() {
 }
 
 let _friendScreenActive = false;
-function showFriendScreen(idx, name) {
+let _friendScreenIdx = 0;
+
+async function showFriendScreen(idx, name) {
   _friendScreenActive = true;
+  _friendScreenIdx = idx;
   document.getElementById('friendScreenTitle').textContent = `🖥️ ${name} – Bildschirm Live`;
   document.getElementById('friendScreenStatus').textContent = 'Verbinde...';
+  document.getElementById('friendMonitorPicker').innerHTML = '';
   document.getElementById('friendScreenOverlay').classList.add('show');
   const img = document.getElementById('friendScreenImg');
   img.src = `/api/friend/${idx}/screen?` + Date.now();
   img.onload  = () => { document.getElementById('friendScreenStatus').textContent = 'Live'; };
   img.onerror = () => { document.getElementById('friendScreenStatus').textContent = '⛔ Kein Zugriff'; img.src = ''; };
+  await loadFriendMonitorPicker(idx);
 }
+
+async function loadFriendMonitorPicker(idx) {
+  try {
+    const r = await fetch(`/api/friend/${idx}/screen/monitors`);
+    const d = await r.json();
+    const picker = document.getElementById('friendMonitorPicker');
+    picker.innerHTML = '';
+    (d.monitors || []).forEach(m => {
+      const btn = document.createElement('button');
+      btn.textContent = m.label;
+      btn.style.cssText = 'padding:4px 10px;border-radius:8px;font-size:12px;cursor:pointer;border:1px solid ' +
+        (m.idx === d.active ? '#fbbf24;background:#f59e0b;color:#000;font-weight:600;' : '#334155;background:none;color:#94a3b8;');
+      btn.onclick = () => selectFriendMonitor(idx, m.idx);
+      picker.appendChild(btn);
+    });
+  } catch(e) {}
+}
+
+async function selectFriendMonitor(friendIdx, monIdx) {
+  await fetch(`/api/friend/${friendIdx}/screen/monitor`, {method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({idx: monIdx})});
+  const img = document.getElementById('friendScreenImg');
+  img.src = `/api/friend/${friendIdx}/screen?` + Date.now();
+  await loadFriendMonitorPicker(friendIdx);
+}
+
 function closeFriendScreen() {
   _friendScreenActive = false;
   document.getElementById('friendScreenOverlay').classList.remove('show');
@@ -2408,6 +2439,31 @@ def friend_screen(idx):
         )
     except Exception as e:
         return jsonify(error=str(e)), 503
+
+@app.route('/api/friend/<int:idx>/screen/monitors')
+@login_required
+def friend_screen_monitors(idx):
+    if idx >= len(FRIENDS):
+        return jsonify(monitors=[], active=1), 404
+    url = FRIENDS[idx]['url']
+    try:
+        r = req.get(f"{url}/api/admin/screen/monitors", timeout=5)
+        return jsonify(r.json())
+    except Exception as e:
+        return jsonify(monitors=[{'idx': 1, 'label': 'Monitor 1'}], active=1)
+
+@app.route('/api/friend/<int:idx>/screen/monitor', methods=['POST'])
+@login_required
+def friend_screen_set_monitor(idx):
+    if idx >= len(FRIENDS):
+        return jsonify(ok=False), 404
+    url = FRIENDS[idx]['url']
+    try:
+        data = request.get_json(force=True)
+        r = req.post(f"{url}/api/admin/screen/monitor", json=data, timeout=5)
+        return jsonify(r.json())
+    except Exception as e:
+        return jsonify(ok=False, error=str(e))
 
 
 # ── START ──────────────────────────────────────────────────────────
