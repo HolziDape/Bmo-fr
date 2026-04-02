@@ -1,3 +1,0 @@
--Vollbild in screenshare
--bessere qualitat im screemshare
--beim freunde tab auch einstellen können wer wer ist also der tailscale Adresse einen namen geben

@@ -926,7 +926,17 @@ def route_ping():
 
 
 # ── START ───────────────────────────────────────────────────────────────────
+def _warmup_ollama():
+    """Lädt das Ollama-Modell vorab in den RAM — erster Prompt wird schnell."""
+    try:
+        log.info(f"Ollama Warmup: Lade {OLLAMA_MODEL} vor...")
+        ollama.chat(model=OLLAMA_MODEL, messages=[{"role": "user", "content": "hi"}])
+        log.info("Ollama Warmup abgeschlossen — Modell bereit.")
+    except Exception as e:
+        log.warning(f"Ollama Warmup fehlgeschlagen (Ollama läuft?): {e}")
+
 if __name__ == '__main__':
     log.info("BMO Core startet...")
     log.info(f"Port: {PORT} | Modell: {OLLAMA_MODEL} | Whisper: {WHISPER_MODEL_SIZE}")
+    threading.Thread(target=_warmup_ollama, daemon=True).start()
     app.run(host='0.0.0.0', port=PORT, debug=False, threaded=True)
