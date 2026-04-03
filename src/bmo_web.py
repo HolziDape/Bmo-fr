@@ -36,10 +36,24 @@ import threading
 import time as _time
 
 try:
-    from PIL import ImageGrab
+    import mss as _mss_module
+    from PIL import Image as _PilImage
+    _MSS_OK = True
     _SCREEN_OK = True
 except ImportError:
-    _SCREEN_OK = False
+    _MSS_OK = False
+    try:
+        from PIL import ImageGrab, Image as _PilImage
+        _SCREEN_OK = True
+    except ImportError:
+        _SCREEN_OK = False
+
+try:
+    import pyautogui as _pag
+    _pag.FAILSAFE = True
+    _PYAUTOGUI_OK = True
+except ImportError:
+    _PYAUTOGUI_OK = False
 
 app  = Flask(__name__)
 CORS(app)
@@ -1022,6 +1036,62 @@ HTML = """<!DOCTYPE html>
   }
   /* Admin-zu-Freund Buttons */
   .qbtn.friend { border-color: #f59e0b; color: #fbbf24; }
+
+  /* ── NOTIFY OVERLAY ── */
+  .notify-form input, .notify-form textarea {
+    width: 100%;
+    background: var(--bg3);
+    border: 1px solid var(--border);
+    border-radius: 12px;
+    padding: 11px 14px;
+    color: var(--text);
+    font-size: 15px;
+    margin-bottom: 10px;
+    outline: none;
+    font-family: inherit;
+  }
+  .notify-form input:focus, .notify-form textarea:focus { border-color: var(--green); }
+  .notify-form textarea { resize: vertical; min-height: 80px; }
+
+  /* ── PROZESS LISTE ── */
+  .proc-list { max-height: 52dvh; overflow-y: auto; display: flex; flex-direction: column; gap: 6px; }
+  .proc-item {
+    display: flex; align-items: center; gap: 10px;
+    background: var(--bg3); border: 1px solid var(--border);
+    border-radius: 12px; padding: 9px 12px;
+  }
+  .proc-name { flex: 1; font-size: 13px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .proc-stats { font-size: 11px; color: var(--text2); flex-shrink: 0; min-width: 90px; text-align: right; }
+  .proc-kill {
+    background: rgba(239,68,68,.15); border: 1px solid rgba(239,68,68,.3);
+    border-radius: 8px; padding: 4px 10px; color: #f87171;
+    font-size: 12px; cursor: pointer; flex-shrink: 0;
+  }
+  .proc-kill:active { opacity: 0.7; }
+  .proc-kill:disabled { opacity: 0.4; cursor: default; }
+
+  /* ── DRAW TOOLBAR ── */
+  .draw-toolbar {
+    position: absolute; bottom: 10px; left: 50%; transform: translateX(-50%);
+    display: flex; gap: 8px; align-items: center;
+    background: rgba(0,0,0,.8); border: 1px solid #334155;
+    border-radius: 20px; padding: 6px 14px;
+    backdrop-filter: blur(8px); z-index: 20;
+  }
+  #drawCanvas {
+    position: absolute; top: 0; left: 0;
+    width: 100%; height: 100%;
+    cursor: crosshair; touch-action: none; z-index: 10;
+  }
+
+  /* ── PONG ── */
+  #pongCanvas { width: 100%; display: block; border-radius: 12px; background: #0a0a1a; touch-action: none; }
+  .pong-score {
+    display: flex; justify-content: center; gap: 40px;
+    font-size: 36px; font-weight: 700; color: #fff;
+    margin-bottom: 8px; font-variant-numeric: tabular-nums;
+  }
+  .pong-info { text-align: center; color: var(--text2); font-size: 13px; margin-top: 8px; }
 </style>
 </head>
 <body>
@@ -1063,6 +1133,18 @@ HTML = """<!DOCTYPE html>
     </button>
     <button class="qbtn friend" onclick="showFriendScreen()">
       <span class="icon">🖥️</span>F.Screen
+    </button>
+    <button class="qbtn" onclick="showNotify()" style="border-color:#06b6d4;color:#22d3ee;">
+      <span class="icon">🔔</span>Notify
+    </button>
+    <button class="qbtn friend" onclick="friendNotify()">
+      <span class="icon">🔔</span>F.Notify
+    </button>
+    <button class="qbtn" onclick="showProcesses()" style="border-color:#fb923c;color:#fdba74;">
+      <span class="icon">📋</span>Prozesse
+    </button>
+    <button class="qbtn" onclick="showPong()" style="border-color:#22c55e;color:#4ade80;">
+      <span class="icon">🏓</span>Pong
     </button>
   </div>
 
@@ -1213,15 +1295,36 @@ HTML = """<!DOCTYPE html>
   <div class="screen-sheet" onclick="event.stopPropagation()">
     <div class="screen-header">
       <span style="font-weight:600;font-size:15px;color:#e2e8f0;">🖥️ Bildschirm Live</span>
-      <div style="display:flex;gap:8px;align-items:center;">
+      <div style="display:flex;gap:6px;align-items:center;flex-wrap:wrap;">
         <span id="screenFps" style="font-size:11px;color:#64748b;"></span>
+        <button id="remoteBtn" onclick="toggleRemote()"
+          style="background:none;border:1px solid #334155;border-radius:8px;color:#94a3b8;padding:4px 10px;cursor:pointer;font-size:12px;transition:color .2s,border-color .2s;">
+          🖱 Steuerung
+        </button>
+        <button id="drawScreenBtn" onclick="toggleDraw()"
+          style="background:none;border:1px solid #334155;border-radius:8px;color:#94a3b8;padding:4px 10px;cursor:pointer;font-size:12px;transition:color .2s,border-color .2s;">
+          ✏️ Zeichnen
+        </button>
         <button onclick="closeScreen()"
-          style="background:none;border:1px solid #334155;border-radius:8px;color:#94a3b8;padding:5px 12px;cursor:pointer;font-size:13px;">
-          ✕ Schließen
+          style="background:none;border:1px solid #334155;border-radius:8px;color:#94a3b8;padding:4px 10px;cursor:pointer;font-size:13px;">
+          ✕
         </button>
       </div>
     </div>
-    <img id="screenImg" src="" alt="Bildschirm wird geladen...">
+    <div style="position:relative;line-height:0;">
+      <img id="screenImg" src="" alt="Bildschirm wird geladen..." style="width:100%;display:block;">
+      <canvas id="drawCanvas" style="display:none;"></canvas>
+      <div class="draw-toolbar" id="drawToolbar" style="display:none;">
+        <input type="color" id="drawColor" value="#ff3333"
+          style="width:28px;height:28px;border:none;border-radius:6px;cursor:pointer;background:none;padding:0;">
+        <input type="range" id="drawWidth" min="2" max="20" value="5"
+          style="width:70px;accent-color:var(--green);">
+        <button onclick="clearDraw()"
+          style="background:none;border:1px solid #475569;border-radius:8px;color:#94a3b8;padding:3px 10px;font-size:12px;cursor:pointer;">
+          🗑
+        </button>
+      </div>
+    </div>
   </div>
 </div>
 
@@ -1239,6 +1342,69 @@ HTML = """<!DOCTYPE html>
       </div>
     </div>
     <img id="friendScreenImg" src="" alt="Freund Bildschirm wird geladen...">
+  </div>
+</div>
+
+<!-- NOTIFY OVERLAY -->
+<div class="overlay" id="notifyOverlay" onclick="closeOverlay('notifyOverlay')">
+  <div class="sheet" onclick="event.stopPropagation()">
+    <div class="sheet-handle"></div>
+    <h2>🔔 Windows Notification</h2>
+    <p style="color:var(--text2);font-size:13px;margin-bottom:16px;">Sendet ein Popup direkt auf den PC-Bildschirm.</p>
+    <div class="notify-form">
+      <input type="text" id="notifyTitle" placeholder="Titel (z.B. BMO)" maxlength="64">
+      <textarea id="notifyMsg" placeholder="Nachricht..."></textarea>
+    </div>
+    <button class="btn-primary" onclick="sendNotification()">🔔 Senden</button>
+    <button class="btn-primary" onclick="closeOverlay('notifyOverlay')"
+      style="background:var(--bg3);border:1px solid var(--border);margin-top:8px;">Abbrechen</button>
+  </div>
+</div>
+
+<!-- PROZESSE OVERLAY -->
+<div class="overlay" id="processesOverlay" onclick="closeOverlay('processesOverlay')">
+  <div class="sheet" onclick="event.stopPropagation()">
+    <div class="sheet-handle"></div>
+    <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:14px;">
+      <h2 style="margin:0;">📋 Prozesse</h2>
+      <button onclick="loadProcesses()"
+        style="background:var(--bg3);border:1px solid var(--border);border-radius:10px;color:var(--text2);padding:5px 14px;font-size:13px;cursor:pointer;">
+        ↻ Reload
+      </button>
+    </div>
+    <div class="proc-list" id="procList">
+      <div class="notes-empty">Lade...</div>
+    </div>
+    <button class="btn-primary" onclick="closeOverlay('processesOverlay')" style="margin-top:12px;">Schließen</button>
+  </div>
+</div>
+
+<!-- PONG OVERLAY -->
+<div class="overlay" id="pongOverlay" onclick="void(0)">
+  <div class="sheet" onclick="event.stopPropagation()" style="max-width:640px;">
+    <div class="sheet-handle"></div>
+    <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:6px;">
+      <h2 style="margin:0;">🏓 BMO Pong</h2>
+      <button onclick="closePong()"
+        style="background:none;border:1px solid var(--border);border-radius:8px;color:var(--text2);padding:5px 12px;font-size:13px;cursor:pointer;">✕</button>
+    </div>
+    <div class="pong-score">
+      <span id="pongScoreL" style="color:#2b8773;">0</span>
+      <span style="color:#475569;">:</span>
+      <span id="pongScoreR" style="color:#f97316;">0</span>
+    </div>
+    <canvas id="pongCanvas" width="600" height="380"></canvas>
+    <div class="pong-info" id="pongInfo">Verbinde...</div>
+    <div style="display:flex;gap:8px;margin-top:10px;">
+      <button onclick="pongReset()"
+        style="flex:1;padding:12px;background:var(--bg3);border:1px solid var(--border);border-radius:12px;color:var(--text);font-size:14px;cursor:pointer;">
+        ↺ Reset
+      </button>
+      <button onclick="closePong()"
+        style="flex:1;padding:12px;background:var(--bg3);border:1px solid var(--border);border-radius:12px;color:var(--text);font-size:14px;cursor:pointer;">
+        Beenden
+      </button>
+    </div>
   </div>
 </div>
 
@@ -1381,8 +1547,14 @@ function showScreen() {
 
 function closeScreen() {
   _screenActive = false;
+  // Deaktiviere Remote/Draw beim Schließen
+  if (_remoteOn) { _remoteOn = false; fetch('/api/remote/toggle',{method:'POST'}).catch(()=>{}); disableRemoteCapture(); }
+  if (_drawMode)  { _drawMode = false;
+    document.getElementById('drawCanvas').style.display = 'none';
+    document.getElementById('drawToolbar').style.display = 'none';
+    fetch('/api/draw', {method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({action:'close'})}).catch(()=>{});
+  }
   document.getElementById('screenOverlay').classList.remove('show');
-  // src leeren stoppt den MJPEG-Stream (spart Bandbreite)
   setTimeout(() => {
     if (!_screenActive) document.getElementById('screenImg').src = '';
   }, 300);
@@ -1783,6 +1955,346 @@ micBtn.addEventListener('click', async () => {
   }
 });
 
+// ── UTILS ────────────────────────────────────────────────────────
+function escHtml(s) {
+  return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;')
+                  .replace(/"/g,'&quot;').replace(/'/g,'&#39;');
+}
+function throttle(fn, delay) {
+  let last = 0;
+  return function(...args) {
+    const now = Date.now();
+    if (now - last >= delay) { last = now; fn(...args); }
+  };
+}
+
+// ── WINDOWS NOTIFICATION ─────────────────────────────────────────
+function showNotify() {
+  document.getElementById('notifyTitle').value = 'BMO';
+  document.getElementById('notifyMsg').value = '';
+  document.getElementById('notifyOverlay').classList.add('show');
+  setTimeout(() => document.getElementById('notifyMsg').focus(), 300);
+}
+async function sendNotification() {
+  const title   = document.getElementById('notifyTitle').value.trim() || 'BMO';
+  const message = document.getElementById('notifyMsg').value.trim();
+  if (!message) return;
+  try {
+    const r = await fetch('/api/notify', {
+      method: 'POST',
+      headers: {'Content-Type':'application/json'},
+      body: JSON.stringify({title, message})
+    });
+    const d = await r.json();
+    closeOverlay('notifyOverlay');
+    addMsg(d.ok ? '🔔 Notification gesendet!' : '⛔ ' + (d.error || 'Fehler'), 'sys');
+  } catch(e) { addMsg('Fehler 😢', 'sys'); }
+}
+async function friendNotify() {
+  const title   = prompt('Titel:', 'Hey!');
+  if (title === null) return;
+  const message = prompt('Nachricht:', '');
+  if (!message) return;
+  try {
+    const r = await fetch('/api/friend/notify', {
+      method: 'POST',
+      headers: {'Content-Type':'application/json'},
+      body: JSON.stringify({title, message})
+    });
+    const d = await r.json();
+    addMsg(d.ok ? '🔔 Notification an Freund gesendet!' : '⛔ ' + (d.error || 'Kein Zugriff'), 'sys');
+  } catch(e) { addMsg('Freund nicht erreichbar 😢', 'sys'); }
+}
+
+// ── PROZESS MANAGER ──────────────────────────────────────────────
+async function showProcesses() {
+  document.getElementById('processesOverlay').classList.add('show');
+  await loadProcesses();
+}
+async function loadProcesses() {
+  document.getElementById('procList').innerHTML = '<div class="notes-empty">Lade...</div>';
+  try {
+    const r = await fetch('/api/processes');
+    const d = await r.json();
+    renderProcesses(d.processes || []);
+  } catch(e) {
+    document.getElementById('procList').innerHTML = '<div class="notes-empty">Fehler beim Laden.</div>';
+  }
+}
+function renderProcesses(procs) {
+  if (!procs.length) {
+    document.getElementById('procList').innerHTML = '<div class="notes-empty">Keine Prozesse.</div>';
+    return;
+  }
+  document.getElementById('procList').innerHTML = procs.map(p => `
+    <div class="proc-item" id="proc-${p.pid}">
+      <div class="proc-name" title="${escHtml(p.name)}">${escHtml(p.name)}</div>
+      <div class="proc-stats">CPU ${p.cpu}% · RAM ${p.mem}%</div>
+      <button class="proc-kill" onclick="killProcess(${p.pid},this)">Kill</button>
+    </div>
+  `).join('');
+}
+async function killProcess(pid, btn) {
+  btn.disabled = true; btn.textContent = '...';
+  try {
+    const r = await fetch('/api/processes/' + pid + '/kill', {method:'POST'});
+    const d = await r.json();
+    if (d.ok) {
+      document.getElementById('proc-' + pid)?.remove();
+    } else {
+      btn.textContent = '⛔';
+      setTimeout(() => { btn.textContent = 'Kill'; btn.disabled = false; }, 2000);
+    }
+  } catch(e) { btn.textContent = 'Kill'; btn.disabled = false; }
+}
+
+// ── REMOTE CONTROL ───────────────────────────────────────────────
+let _remoteOn = false;
+
+async function toggleRemote() {
+  try {
+    const r = await fetch('/api/remote/toggle', {method:'POST'});
+    const d = await r.json();
+    _remoteOn = d.enabled;
+    const btn = document.getElementById('remoteBtn');
+    if (_remoteOn) {
+      btn.style.color = '#4ade80'; btn.style.borderColor = '#4ade80';
+      enableRemoteCapture();
+    } else {
+      btn.style.color = '#94a3b8'; btn.style.borderColor = '#334155';
+      disableRemoteCapture();
+    }
+  } catch(e) {}
+}
+
+function enableRemoteCapture() {
+  let ov = document.getElementById('remoteOverlay');
+  if (!ov) {
+    ov = document.createElement('div');
+    ov.id = 'remoteOverlay';
+    ov.style.cssText = 'position:absolute;top:0;left:0;width:100%;height:100%;cursor:crosshair;z-index:15;';
+    document.getElementById('screenImg').parentElement.appendChild(ov);
+  }
+  ov.style.display = 'block';
+  const sendMove = throttle(e => _sendRemote('move', e, ov), 40);
+  ov.onmousemove  = sendMove;
+  ov.onclick      = e => _sendRemote('click', e, ov);
+  ov.ondblclick   = e => _sendRemote('dblclick', e, ov);
+  ov.onwheel      = e => {
+    e.preventDefault();
+    const rect = ov.getBoundingClientRect();
+    _sendRemoteRaw('scroll', {
+      rx: (e.clientX - rect.left) / rect.width,
+      ry: (e.clientY - rect.top)  / rect.height,
+      delta: e.deltaY > 0 ? -3 : 3
+    });
+  };
+  ov.ontouchmove  = e => { e.preventDefault(); _sendRemote('move',  e.touches[0], ov); };
+  ov.ontouchstart = e => { e.preventDefault(); _sendRemote('click', e.touches[0], ov); };
+}
+function disableRemoteCapture() {
+  const ov = document.getElementById('remoteOverlay');
+  if (ov) ov.style.display = 'none';
+}
+function _sendRemote(type, e, container) {
+  const rect = container.getBoundingClientRect();
+  _sendRemoteRaw(type, {
+    rx: (e.clientX - rect.left) / rect.width,
+    ry: (e.clientY - rect.top)  / rect.height
+  });
+}
+async function _sendRemoteRaw(type, data) {
+  if (!_remoteOn) return;
+  try {
+    await fetch('/api/remote/input', {
+      method: 'POST',
+      headers: {'Content-Type':'application/json'},
+      body: JSON.stringify({type, ...data})
+    });
+  } catch(e) {}
+}
+
+// ── DRAW OVERLAY ─────────────────────────────────────────────────
+let _drawMode = false, _drawing = false, _curStroke = null;
+
+function toggleDraw() {
+  _drawMode = !_drawMode;
+  const canvas  = document.getElementById('drawCanvas');
+  const toolbar = document.getElementById('drawToolbar');
+  const btn     = document.getElementById('drawScreenBtn');
+  if (_drawMode) {
+    const img = document.getElementById('screenImg');
+    canvas.width  = img.offsetWidth;
+    canvas.height = img.offsetHeight;
+    canvas.style.display = 'block';
+    toolbar.style.display = 'flex';
+    btn.style.color = '#f472b6'; btn.style.borderColor = '#f472b6';
+    _setupDrawCanvas(canvas);
+  } else {
+    canvas.style.display = 'none';
+    toolbar.style.display = 'none';
+    btn.style.color = '#94a3b8'; btn.style.borderColor = '#334155';
+    fetch('/api/draw', {
+      method:'POST', headers:{'Content-Type':'application/json'},
+      body: JSON.stringify({action:'close'})
+    }).catch(()=>{});
+  }
+}
+function _setupDrawCanvas(canvas) {
+  const ctx = canvas.getContext('2d');
+  ctx.clearRect(0, 0, canvas.width, canvas.height);
+  function getPos(e) {
+    const rect = canvas.getBoundingClientRect();
+    const t = e.touches ? e.touches[0] : e;
+    return {
+      x: (t.clientX - rect.left) / rect.width,
+      y: (t.clientY - rect.top)  / rect.height
+    };
+  }
+  function startDraw(e) {
+    e.preventDefault(); _drawing = true;
+    const p = getPos(e);
+    const color = document.getElementById('drawColor').value;
+    const width = parseInt(document.getElementById('drawWidth').value);
+    _curStroke = {pts: [[p.x, p.y]], color, width};
+    ctx.beginPath();
+    ctx.moveTo(p.x * canvas.width, p.y * canvas.height);
+    ctx.strokeStyle = color; ctx.lineWidth = width;
+    ctx.lineCap = 'round'; ctx.lineJoin = 'round';
+  }
+  function doDraw(e) {
+    e.preventDefault();
+    if (!_drawing || !_curStroke) return;
+    const p = getPos(e);
+    _curStroke.pts.push([p.x, p.y]);
+    ctx.lineTo(p.x * canvas.width, p.y * canvas.height);
+    ctx.stroke();
+  }
+  function endDraw() {
+    if (!_drawing || !_curStroke) return;
+    _drawing = false;
+    if (_curStroke.pts.length > 1) {
+      fetch('/api/draw', {
+        method: 'POST', headers: {'Content-Type':'application/json'},
+        body: JSON.stringify({action:'add', ..._curStroke})
+      }).catch(()=>{});
+    }
+    _curStroke = null;
+  }
+  canvas.onmousedown  = startDraw; canvas.onmousemove  = doDraw; canvas.onmouseup   = endDraw;
+  canvas.ontouchstart = startDraw; canvas.ontouchmove  = doDraw; canvas.ontouchend  = endDraw;
+}
+async function clearDraw() {
+  const canvas = document.getElementById('drawCanvas');
+  canvas.getContext('2d').clearRect(0, 0, canvas.width, canvas.height);
+  await fetch('/api/draw', {
+    method:'POST', headers:{'Content-Type':'application/json'},
+    body: JSON.stringify({action:'clear'})
+  }).catch(()=>{});
+}
+
+// ── PONG GAME ────────────────────────────────────────────────────
+let _pongActive = false, _pongSide = null, _pongRAF = null, _pongPoll = null;
+let _myPaddleY = 0.5;
+
+async function showPong() {
+  await fetch('/api/pong/reset', {method:'POST'}).catch(()=>{});
+  _pongActive = true;
+  document.getElementById('pongOverlay').classList.add('show');
+  document.getElementById('pongInfo').textContent = 'Verbinde...';
+  try {
+    const r = await fetch('/api/pong/join', {method:'POST'});
+    const d = await r.json();
+    _pongSide = d.side;
+    document.getElementById('pongInfo').textContent =
+      _pongSide === 'left'      ? '🟢 Du = linkes Paddle (Maus/Touch bewegen)' :
+      _pongSide === 'right'     ? '🟠 Du = rechtes Paddle (Maus/Touch bewegen)' :
+                                  '👀 Zuschauer';
+    _startPongInput();
+    _startPongRender();
+  } catch(e) {
+    document.getElementById('pongInfo').textContent = 'Verbindungsfehler 😢';
+  }
+}
+function closePong() {
+  _pongActive = false;
+  if (_pongRAF)  cancelAnimationFrame(_pongRAF);
+  if (_pongPoll) clearInterval(_pongPoll);
+  _pongSide = null;
+  document.getElementById('pongOverlay').classList.remove('show');
+}
+async function pongReset() {
+  closePong();
+  await new Promise(r => setTimeout(r, 200));
+  showPong();
+}
+function _startPongInput() {
+  const canvas = document.getElementById('pongCanvas');
+  function updateY(e) {
+    const rect = canvas.getBoundingClientRect();
+    const t = e.touches ? e.touches[0] : e;
+    _myPaddleY = Math.max(0.08, Math.min(0.92, (t.clientY - rect.top) / rect.height));
+  }
+  canvas.onmousemove  = updateY;
+  canvas.ontouchmove  = e => { e.preventDefault(); updateY(e); };
+  canvas.ontouchstart = e => { e.preventDefault(); updateY(e); };
+  _pongPoll = setInterval(async () => {
+    if (!_pongActive || !_pongSide || _pongSide === 'spectator') return;
+    fetch('/api/pong/paddle', {
+      method:'POST', headers:{'Content-Type':'application/json'},
+      body: JSON.stringify({side: _pongSide, y: _myPaddleY})
+    }).catch(()=>{});
+  }, 50);
+}
+function _startPongRender() {
+  const canvas = document.getElementById('pongCanvas');
+  const ctx    = canvas.getContext('2d');
+  const W = canvas.width, H = canvas.height;
+  let state = null, frame = 0;
+
+  async function fetchState() {
+    try { state = await (await fetch('/api/pong/state')).json(); } catch(e) {}
+  }
+  function loop() {
+    if (!_pongActive) return;
+    if (frame++ % 2 === 0) fetchState();   // ~15 polls/s at 30fps
+    // Background
+    ctx.fillStyle = '#0a0a1a'; ctx.fillRect(0, 0, W, H);
+    // Center line
+    ctx.setLineDash([8, 12]); ctx.strokeStyle = '#1e293b'; ctx.lineWidth = 2;
+    ctx.beginPath(); ctx.moveTo(W/2, 0); ctx.lineTo(W/2, H); ctx.stroke();
+    ctx.setLineDash([]);
+    if (state) {
+      document.getElementById('pongScoreL').textContent = state.score_l ?? 0;
+      document.getElementById('pongScoreR').textContent = state.score_r ?? 0;
+      const ph = H * 0.15, pw = 12;
+      // Left paddle
+      ctx.fillStyle = _pongSide === 'left' ? '#2b8773' : '#1e4d43';
+      _roundRect(ctx, 8, state.left * H - ph/2, pw, ph, 4);
+      if (_pongSide === 'left') { ctx.strokeStyle='#4ade80'; ctx.lineWidth=2; _roundRect(ctx, 8, state.left*H-ph/2, pw, ph, 4, true); }
+      // Right paddle
+      ctx.fillStyle = _pongSide === 'right' ? '#f97316' : '#5a2d0c';
+      _roundRect(ctx, W-8-pw, state.right * H - ph/2, pw, ph, 4);
+      if (_pongSide === 'right') { ctx.strokeStyle='#4ade80'; ctx.lineWidth=2; _roundRect(ctx, W-8-pw, state.right*H-ph/2, pw, ph, 4, true); }
+      // Ball glow
+      const bx = state.ball.x * W, by = state.ball.y * H;
+      const grd = ctx.createRadialGradient(bx, by, 0, bx, by, 14);
+      grd.addColorStop(0, 'rgba(255,255,255,.9)');
+      grd.addColorStop(1, 'rgba(255,255,255,0)');
+      ctx.fillStyle = grd; ctx.beginPath(); ctx.arc(bx, by, 14, 0, Math.PI*2); ctx.fill();
+      ctx.fillStyle = '#fff'; ctx.beginPath(); ctx.arc(bx, by, 6, 0, Math.PI*2); ctx.fill();
+    }
+    _pongRAF = requestAnimationFrame(loop);
+  }
+  fetchState(); loop();
+}
+function _roundRect(ctx, x, y, w, h, r, stroke=false) {
+  ctx.beginPath();
+  if (ctx.roundRect) { ctx.roundRect(x, y, w, h, r); }
+  else { ctx.rect(x, y, w, h); }
+  stroke ? ctx.stroke() : ctx.fill();
+}
+
 // ── FRESH START ON LOAD ──────────────────────────────────────────
 fetch('/api/history/clear', {method: 'POST'}).catch(() => {});
 </script>
@@ -1997,26 +2509,47 @@ def commands_list():
 _screen_lock = threading.Lock()
 
 def _screen_generator():
-    """MJPEG-Generator: streamt den Desktop als ca. 10 FPS JPEG-Stream."""
-    while True:
-        if not _SCREEN_OK:
-            break
-        try:
-            with _screen_lock:
-                img = ImageGrab.grab()
-            # Auf max. 1280px Breite skalieren
-            w, h = img.size
-            new_w = min(w, 1280)
-            new_h = int(h * new_w / w)
-            if (new_w, new_h) != (w, h):
-                img = img.resize((new_w, new_h))
-            buf = io.BytesIO()
-            img.save(buf, format='JPEG', quality=55)
-            frame = buf.getvalue()
-            yield (b'--frame\r\nContent-Type: image/jpeg\r\n\r\n' + frame + b'\r\n')
-        except Exception:
-            pass
-        _time.sleep(0.1)   # max. 10 FPS
+    """MJPEG-Generator: ~25 FPS mit mss, ~12 FPS Fallback mit PIL."""
+    if _MSS_OK:
+        with _mss_module.mss() as sct:
+            monitor = sct.monitors[0]
+            while True:
+                try:
+                    with _screen_lock:
+                        shot = sct.grab(monitor)
+                    img = _PilImage.frombytes('RGB', (shot.width, shot.height),
+                                             shot.bgra, 'raw', 'BGRX')
+                    w, h = img.size
+                    new_w = min(w, 1280)
+                    new_h = int(h * new_w / w)
+                    if (new_w, new_h) != (w, h):
+                        img = img.resize((new_w, new_h))
+                    buf = io.BytesIO()
+                    img.save(buf, format='JPEG', quality=62)
+                    frame = buf.getvalue()
+                    yield (b'--frame\r\nContent-Type: image/jpeg\r\n\r\n' + frame + b'\r\n')
+                except Exception:
+                    pass
+                _time.sleep(0.04)   # ~25 FPS
+    else:
+        while True:
+            if not _SCREEN_OK:
+                break
+            try:
+                with _screen_lock:
+                    img = ImageGrab.grab()
+                w, h = img.size
+                new_w = min(w, 1280)
+                new_h = int(h * new_w / w)
+                if (new_w, new_h) != (w, h):
+                    img = img.resize((new_w, new_h))
+                buf = io.BytesIO()
+                img.save(buf, format='JPEG', quality=62)
+                frame = buf.getvalue()
+                yield (b'--frame\r\nContent-Type: image/jpeg\r\n\r\n' + frame + b'\r\n')
+            except Exception:
+                pass
+            _time.sleep(0.083)  # ~12 FPS
 
 @app.route('/api/screen')
 @login_required
@@ -2057,6 +2590,304 @@ def friend_screen():
     except Exception as e:
         return jsonify(error=str(e)), 503
 
+
+# ── WINDOWS NOTIFICATION ──────────────────────────────────────────
+@app.route('/api/notify', methods=['POST'])
+@login_required
+def send_notification():
+    data = request.json or {}
+    title   = str(data.get('title', 'BMO'))[:64]
+    message = str(data.get('message', ''))[:256]
+    if not message:
+        return jsonify(ok=False, error="Keine Nachricht.")
+    try:
+        try:
+            from winotify import Notification
+            toast = Notification(app_id="BMO", title=title, msg=message)
+            toast.show()
+        except ImportError:
+            # Fallback: PowerShell BalloonTip via systray
+            t = title.replace('"', '').replace("'", "")
+            m = message.replace('"', '').replace("'", "")
+            ps = (
+                'Add-Type -AssemblyName System.Windows.Forms;'
+                '$n=New-Object System.Windows.Forms.NotifyIcon;'
+                '$n.Icon=[System.Drawing.SystemIcons]::Information;'
+                '$n.Visible=$true;'
+                f'$n.ShowBalloonTip(4000,\'{t}\',\'{m}\',[System.Windows.Forms.ToolTipIcon]::Info);'
+                'Start-Sleep 5; $n.Dispose()'
+            )
+            subprocess.Popen(['powershell', '-WindowStyle', 'Hidden', '-Command', ps])
+        return jsonify(ok=True)
+    except Exception as e:
+        return jsonify(ok=False, error=str(e))
+
+@app.route('/api/friend/notify', methods=['POST'])
+@login_required
+def friend_notify():
+    if "HIER_FREUND_IP" in FRIEND_URL:
+        return jsonify(ok=False, error="FRIEND_URL nicht konfiguriert.")
+    try:
+        r = req.post(f"{FRIEND_URL}/api/admin/notify", json=request.json or {}, timeout=5)
+        return jsonify(r.json())
+    except Exception as e:
+        return jsonify(ok=False, error=str(e))
+
+# ── PROZESS MANAGER ───────────────────────────────────────────────
+@app.route('/api/processes', methods=['GET'])
+@login_required
+def list_processes():
+    procs = []
+    for p in psutil.process_iter(['pid', 'name', 'cpu_percent', 'memory_percent', 'status']):
+        try:
+            info = p.info
+            procs.append({
+                'pid':  info['pid'],
+                'name': info['name'] or '?',
+                'cpu':  round(info['cpu_percent'] or 0, 1),
+                'mem':  round(info['memory_percent'] or 0, 1),
+            })
+        except (psutil.NoSuchProcess, psutil.AccessDenied):
+            pass
+    procs.sort(key=lambda x: x['mem'], reverse=True)
+    return jsonify(processes=procs[:80])
+
+@app.route('/api/processes/<int:pid>/kill', methods=['POST'])
+@login_required
+def kill_process(pid):
+    try:
+        p = psutil.Process(pid)
+        name = p.name()
+        p.terminate()
+        return jsonify(ok=True, name=name)
+    except psutil.NoSuchProcess:
+        return jsonify(ok=False, error="Prozess nicht gefunden.")
+    except psutil.AccessDenied:
+        return jsonify(ok=False, error="Zugriff verweigert.")
+    except Exception as e:
+        return jsonify(ok=False, error=str(e))
+
+# ── REMOTE CONTROL ────────────────────────────────────────────────
+_remote_enabled = False
+
+@app.route('/api/remote/toggle', methods=['POST'])
+@login_required
+def remote_toggle():
+    global _remote_enabled
+    _remote_enabled = not _remote_enabled
+    return jsonify(enabled=_remote_enabled)
+
+@app.route('/api/remote/input', methods=['POST'])
+@login_required
+def remote_input():
+    if not _remote_enabled:
+        return jsonify(ok=False, error="Remote control deaktiviert.")
+    if not _PYAUTOGUI_OK:
+        return jsonify(ok=False, error="pyautogui nicht installiert: pip install pyautogui")
+    data = request.json or {}
+    evt  = data.get('type')
+    try:
+        sw, sh = _pag.size()
+        rx = float(data.get('rx', 0))
+        ry = float(data.get('ry', 0))
+        x, y = int(rx * sw), int(ry * sh)
+        if evt == 'move':
+            _pag.moveTo(x, y, duration=0)
+        elif evt == 'click':
+            _pag.click(x, y, button=data.get('button', 'left'))
+        elif evt == 'dblclick':
+            _pag.doubleClick(x, y)
+        elif evt == 'scroll':
+            _pag.scroll(int(data.get('delta', 3)), x=x, y=y)
+        elif evt == 'key':
+            k = data.get('key', '')
+            if k:
+                _pag.press(k)
+        return jsonify(ok=True)
+    except Exception as e:
+        return jsonify(ok=False, error=str(e))
+
+# ── DRAWING OVERLAY ───────────────────────────────────────────────
+_draw_strokes = []
+_draw_lock    = threading.Lock()
+_draw_active  = False
+
+def _draw_overlay_thread():
+    global _draw_active
+    try:
+        import tkinter as tk
+        _draw_active = True
+        root = tk.Tk()
+        root.overrideredirect(True)
+        sw = root.winfo_screenwidth()
+        sh = root.winfo_screenheight()
+        root.geometry(f"{sw}x{sh}+0+0")
+        root.attributes('-topmost', True)
+        root.configure(bg='black')
+        root.attributes('-transparentcolor', 'black')
+        cv = tk.Canvas(root, width=sw, height=sh, bg='black', highlightthickness=0)
+        cv.pack()
+        _items = []
+
+        def _refresh():
+            nonlocal _items
+            for it in _items:
+                cv.delete(it)
+            _items = []
+            if not _draw_active:
+                root.destroy()
+                return
+            with _draw_lock:
+                strokes = list(_draw_strokes)
+            for stroke in strokes:
+                pts = stroke.get('pts', [])
+                col = stroke.get('color', '#ff3333')
+                w   = stroke.get('width', 5)
+                for i in range(len(pts) - 1):
+                    x1, y1 = pts[i][0] * sw,   pts[i][1] * sh
+                    x2, y2 = pts[i+1][0] * sw, pts[i+1][1] * sh
+                    it = cv.create_line(x1, y1, x2, y2, fill=col, width=w,
+                                        capstyle=tk.ROUND, joinstyle=tk.ROUND)
+                    _items.append(it)
+            root.after(80, _refresh)
+
+        root.after(80, _refresh)
+        root.mainloop()
+    except Exception as e:
+        log.warning(f"Draw overlay error: {e}")
+    finally:
+        _draw_active = False
+
+@app.route('/api/draw', methods=['POST'])
+@login_required
+def draw_overlay():
+    global _draw_strokes, _draw_active
+    data   = request.json or {}
+    action = data.get('action', 'add')
+    if action == 'clear':
+        with _draw_lock:
+            _draw_strokes = []
+        return jsonify(ok=True)
+    elif action == 'close':
+        _draw_active = False
+        with _draw_lock:
+            _draw_strokes = []
+        return jsonify(ok=True)
+    elif action == 'add':
+        seg = {
+            'pts':   data.get('pts', []),
+            'color': data.get('color', '#ff3333'),
+            'width': min(int(data.get('width', 5)), 24),
+        }
+        with _draw_lock:
+            _draw_strokes.append(seg)
+        if not _draw_active:
+            threading.Thread(target=_draw_overlay_thread, daemon=True).start()
+        return jsonify(ok=True)
+    return jsonify(ok=False, error="Unbekannte Aktion.")
+
+# ── PONG GAME ─────────────────────────────────────────────────────
+import random as _random
+_pong_lock = threading.Lock()
+_pong = {
+    'ball':    {'x': 0.5, 'y': 0.5, 'vx': 0.012, 'vy': 0.008},
+    'left':    0.5, 'right': 0.5,
+    'score_l': 0,   'score_r': 0,
+    'running': False,
+}
+
+def _reset_ball(b, direction):
+    b['x'], b['y'] = 0.5, 0.5
+    b['vx'] = direction * 0.012
+    b['vy'] = (_random.random() - 0.5) * 0.016
+
+def _pong_step():
+    with _pong_lock:
+        if not _pong['running']:
+            return
+        b  = _pong['ball']
+        b['x'] += b['vx']
+        b['y'] += b['vy']
+        if b['y'] <= 0.02 or b['y'] >= 0.98:
+            b['vy'] *= -1
+        ph = 0.15
+        if b['x'] <= 0.04:
+            if abs(b['y'] - _pong['left']) < ph:
+                b['vx'] = abs(b['vx']) * 1.05
+                b['vy'] += (b['y'] - _pong['left']) * 0.05
+            else:
+                _pong['score_r'] += 1
+                _reset_ball(b, 1)
+        if b['x'] >= 0.96:
+            if abs(b['y'] - _pong['right']) < ph:
+                b['vx'] = -abs(b['vx']) * 1.05
+                b['vy'] += (b['y'] - _pong['right']) * 0.05
+            else:
+                _pong['score_l'] += 1
+                _reset_ball(b, -1)
+        spd = (b['vx']**2 + b['vy']**2) ** 0.5
+        mx  = 0.025
+        if spd > mx:
+            b['vx'] = b['vx'] / spd * mx
+            b['vy'] = b['vy'] / spd * mx
+
+def _pong_loop():
+    while _pong['running']:
+        _pong_step()
+        _time.sleep(0.033)
+
+@app.route('/api/pong/join', methods=['POST'])
+@login_required
+def pong_join():
+    with _pong_lock:
+        occupied = list(_pong.get('players', {}).values())
+        if 'left' not in occupied:
+            _pong.setdefault('players', {})['p1'] = 'left'
+            side = 'left'
+        elif 'right' not in occupied:
+            _pong.setdefault('players', {})['p2'] = 'right'
+            side = 'right'
+        else:
+            side = 'spectator'
+        if not _pong['running']:
+            _pong['running'] = True
+            threading.Thread(target=_pong_loop, daemon=True).start()
+    return jsonify(side=side)
+
+@app.route('/api/pong/state', methods=['GET'])
+@login_required
+def pong_state():
+    with _pong_lock:
+        return jsonify(
+            ball=dict(_pong['ball']),
+            left=_pong['left'], right=_pong['right'],
+            score_l=_pong['score_l'], score_r=_pong['score_r'],
+            running=_pong['running'],
+        )
+
+@app.route('/api/pong/paddle', methods=['POST'])
+@login_required
+def pong_paddle():
+    data = request.json or {}
+    side = data.get('side')
+    y    = max(0.08, min(0.92, float(data.get('y', 0.5))))
+    with _pong_lock:
+        if side in ('left', 'right'):
+            _pong[side] = y
+    return jsonify(ok=True)
+
+@app.route('/api/pong/reset', methods=['POST'])
+@login_required
+def pong_reset():
+    with _pong_lock:
+        _pong['score_l'] = 0
+        _pong['score_r'] = 0
+        _pong['players'] = {}
+        _pong['running'] = False
+        b = _pong['ball']
+        b['x'], b['y'] = 0.5, 0.5
+        b['vx'], b['vy'] = 0.012, 0.008
+    return jsonify(ok=True)
 
 # ── START ──────────────────────────────────────────────────────────
 if __name__ == '__main__':
