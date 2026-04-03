@@ -39,8 +39,20 @@ core_proc: subprocess.Popen | None = None
 web_proc:  subprocess.Popen | None = None
 
 
+def _kill(proc):
+    """Beendet einen Prozess sauber (falls noch aktiv)."""
+    if proc is None:
+        return
+    try:
+        if proc.poll() is None:
+            proc.terminate()
+            proc.wait(timeout=5)
+    except Exception:
+        pass
+
 def start_core():
     global core_proc
+    _kill(core_proc)   # alte Instanz explizit beenden → kein Port-Konflikt
     log.info("Starte bmo_core.py ...")
     core_proc = subprocess.Popen(
         [PYTHON, CORE],
@@ -53,6 +65,7 @@ def start_core():
 
 def start_web():
     global web_proc
+    _kill(web_proc)    # alte Instanz explizit beenden → kein Port-Konflikt
     log.info("Starte bmo_web.py ...")
     web_proc = subprocess.Popen(
         [PYTHON, WEB],
