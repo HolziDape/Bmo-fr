@@ -36,17 +36,18 @@ import threading
 import time as _time
 
 try:
-    import mss as _mss_module
+    import mss as _mss_lib
     from PIL import Image as _PilImage
-    _MSS_OK = True
-    _SCREEN_OK = True
+    _SCREEN_OK      = True
+    _SCREEN_BACKEND = 'mss'
 except ImportError:
-    _MSS_OK = False
     try:
         from PIL import ImageGrab, Image as _PilImage
-        _SCREEN_OK = True
+        _SCREEN_OK      = True
+        _SCREEN_BACKEND = 'pil'
     except ImportError:
-        _SCREEN_OK = False
+        _SCREEN_OK      = False
+        _SCREEN_BACKEND = None
 
 try:
     import pyautogui as _pag
@@ -83,9 +84,26 @@ def _save_config(data: dict):
             f.write(f"{k}={v}\n")
     log.info("bmo_config.txt gespeichert.")
 
+def _parse_friends(raw: str) -> list:
+    """Parst 'Name|http://url,Name2|http://url2' in eine Liste von {name, url} Dicts."""
+    result = []
+    for entry in raw.split(','):
+        entry = entry.strip()
+        if not entry:
+            continue
+        if '|' in entry:
+            name, url = entry.split('|', 1)
+            result.append({'name': name.strip(), 'url': url.strip()})
+        elif entry.startswith('http'):
+            result.append({'name': 'Freund', 'url': entry})
+    return result
+
 _cfg           = _load_config()
 WEB_PASSWORD   = _cfg.get("WEB_PASSWORD", "").strip() or None
-FRIEND_URL     = _cfg.get("FRIEND_URL", "http://HIER_FREUND_IP:5000").strip()
+# Neue FRIENDS-Liste — fällt auf altes FRIEND_URL zurück
+_raw_friends   = _cfg.get("FRIENDS") or _cfg.get("FRIEND_URL", "")
+FRIENDS: list  = _parse_friends(_raw_friends)
+FRIEND_URL     = FRIENDS[0]['url'] if FRIENDS else "http://HIER_FREUND_IP:5000"
 app.secret_key = (WEB_PASSWORD or "bmo-setup-mode") + "-bmo-secret-42"
 
 def _save_password(pw: str):
@@ -94,11 +112,14 @@ def _save_password(pw: str):
     _save_config(cfg)
     log.info("Passwort in bmo_config.txt gespeichert.")
 
-def _save_friend_url(url: str):
+def _save_friends(friends_raw: str):
     cfg = _load_config()
-    cfg["FRIEND_URL"] = url
+    cfg["FRIENDS"] = friends_raw
     _save_config(cfg)
-    log.info(f"FRIEND_URL gespeichert: {url}")
+    log.info(f"FRIENDS gespeichert: {friends_raw}")
+
+def _save_friend_url(url: str):
+    _save_friends(url)
 
 
 # ── VERBINDUNGSCHECK ───────────────────────────────────────────────
@@ -384,7 +405,7 @@ def logout():
 @app.route('/setup', methods=['GET', 'POST'])
 def setup():
     """Ersteinrichtung — wird beim ersten Start angezeigt wenn noch kein Passwort gesetzt ist."""
-    global WEB_PASSWORD, FRIEND_URL
+    global WEB_PASSWORD, FRIEND_URL, FRIENDS
     if WEB_PASSWORD:
         return redirect(url_for('login'))
     error = None
@@ -400,6 +421,7 @@ def setup():
             _save_password(pw)
             if friend_url:
                 _save_friend_url(friend_url)
+                FRIENDS    = _parse_friends(friend_url)
                 FRIEND_URL = friend_url
             WEB_PASSWORD   = pw
             app.secret_key = pw + "-bmo-secret-42"
@@ -408,6 +430,42 @@ def setup():
             return redirect(url_for('index'))
     from flask import render_template_string
     return render_template_string(SETUP_HTML, error=error)
+
+# ── SETTINGS API ─────────────────────────────────────────────────
+@app.route('/api/settings', methods=['GET'])
+@login_required
+def get_settings():
+    cfg = _load_config()
+    return jsonify(friends=cfg.get('FRIENDS', ''))
+
+@app.route('/api/settings', methods=['POST'])
+@login_required
+def save_settings():
+    global WEB_PASSWORD, FRIENDS, FRIEND_URL
+    data = request.get_json(force=True)
+    changed = []
+
+    new_pw = (data.get('password') or '').strip()
+    if new_pw:
+        _save_password(new_pw)
+        WEB_PASSWORD   = new_pw
+        app.secret_key = new_pw + "-bmo-secret-42"
+        session['authenticated'] = True
+        changed.append('password')
+
+    new_friends = (data.get('friends') or '').strip()
+    if new_friends is not None:
+        _save_friends(new_friends)
+        FRIENDS    = _parse_friends(new_friends)
+        FRIEND_URL = FRIENDS[0]['url'] if FRIENDS else FRIEND_URL
+        changed.append('friends')
+
+    return jsonify(ok=True, changed=changed)
+
+@app.route('/api/friends', methods=['GET'])
+@login_required
+def list_friends():
+    return jsonify(friends=[{'idx': i, 'name': f['name'], 'url': f['url']} for i, f in enumerate(FRIENDS)])
 
 # ── BMO ICON SVG ──────────────────────────────────────────────────
 BMO_SVG = '''<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 180 215">
@@ -1128,11 +1186,11 @@ HTML = """<!DOCTYPE html>
     <button class="qbtn" onclick="showScreen()" style="border-color:#0ea5e9;color:#38bdf8;">
       <span class="icon">🖥️</span>Screen
     </button>
-    <button class="qbtn friend" onclick="triggerFriendJumpscare()">
-      <span class="icon">👻</span>F.Scare
+    <button class="qbtn friend" onclick="showFriends()">
+      <span class="icon">👥</span>Freunde
     </button>
-    <button class="qbtn friend" onclick="showFriendScreen()">
-      <span class="icon">🖥️</span>F.Screen
+    <button class="qbtn" onclick="showSettings()" style="border-color:#475569;color:#94a3b8;">
+      <span class="icon">⚙️</span>Settings
     </button>
     <button class="qbtn" onclick="showNotify()" style="border-color:#06b6d4;color:#22d3ee;">
       <span class="icon">🔔</span>Notify
@@ -1242,6 +1300,33 @@ HTML = """<!DOCTYPE html>
   </div>
 </div>
 
+<!-- FREUNDE OVERLAY -->
+<div class="overlay" id="friendsOverlay" onclick="closeOverlay('friendsOverlay')">
+  <div class="sheet" onclick="event.stopPropagation()">
+    <div class="sheet-handle"></div>
+    <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:14px;">
+      <h2 style="margin:0;">👥 Freunde</h2>
+      <button onclick="toggleFriendsEdit()"
+        style="background:none;border:1px solid var(--border);border-radius:10px;color:var(--text2);padding:6px 12px;cursor:pointer;font-size:13px;">✏️ Bearbeiten</button>
+    </div>
+    <!-- Edit-Bereich (standardmäßig versteckt) -->
+    <div id="friendsEditArea" style="display:none;margin-bottom:16px;">
+      <div style="font-size:13px;color:var(--text2);margin-bottom:6px;">Name|http://IP:5000 — eine pro Zeile</div>
+      <textarea id="friendsEditInput" rows="4" placeholder="Alice|http://100.x.x.x:5000&#10;Bob|http://100.y.y.y:5000"
+        style="width:100%;background:var(--bg3);border:1px solid var(--border);border-radius:12px;padding:11px 14px;color:var(--text);font-size:14px;outline:none;box-sizing:border-box;resize:vertical;font-family:monospace;"></textarea>
+      <div id="friendsEditMsg" style="font-size:13px;color:#5eead4;min-height:16px;margin-top:4px;"></div>
+      <button onclick="saveFriendsEdit()"
+        style="width:100%;margin-top:8px;padding:12px;background:var(--green);border:none;border-radius:12px;color:#000;font-size:14px;font-weight:600;cursor:pointer;">Speichern</button>
+    </div>
+    <button onclick="scareAll()"
+      style="width:100%;padding:14px;background:#f59e0b;border:none;border-radius:14px;color:#000;font-size:15px;font-weight:700;cursor:pointer;margin-bottom:16px;">
+      👻 Alle gleichzeitig schrecken
+    </button>
+    <div id="friendsList"></div>
+    <button class="btn-primary" onclick="closeOverlay('friendsOverlay')" style="margin-top:14px;">Schließen</button>
+  </div>
+</div>
+
 <!-- KAMERA OVERLAY -->
 <div class="overlay" id="cameraOverlay" onclick="void(0)">
   <div class="sheet" onclick="event.stopPropagation()">
@@ -1305,6 +1390,8 @@ HTML = """<!DOCTYPE html>
           style="background:none;border:1px solid #334155;border-radius:8px;color:#94a3b8;padding:4px 10px;cursor:pointer;font-size:12px;transition:color .2s,border-color .2s;">
           ✏️ Zeichnen
         </button>
+        <button onclick="toggleFullscreen('screenImg')"
+          style="background:none;border:1px solid #334155;border-radius:8px;color:#94a3b8;padding:4px 10px;cursor:pointer;font-size:13px;">⛶ Vollbild</button>
         <button onclick="closeScreen()"
           style="background:none;border:1px solid #334155;border-radius:8px;color:#94a3b8;padding:4px 10px;cursor:pointer;font-size:13px;">
           ✕
@@ -1325,6 +1412,7 @@ HTML = """<!DOCTYPE html>
         </button>
       </div>
     </div>
+    <div id="monitorPicker" style="display:flex;gap:6px;padding:6px 8px 2px;flex-wrap:wrap;"></div>
   </div>
 </div>
 
@@ -1332,16 +1420,40 @@ HTML = """<!DOCTYPE html>
 <div class="overlay screen-overlay" id="friendScreenOverlay">
   <div class="screen-sheet" onclick="event.stopPropagation()">
     <div class="screen-header">
-      <span style="font-weight:600;font-size:15px;color:#fbbf24;">🖥️ Freund – Bildschirm Live</span>
+      <span id="friendScreenTitle" style="font-weight:600;font-size:15px;color:#fbbf24;">🖥️ Freund – Bildschirm Live</span>
       <div style="display:flex;gap:8px;align-items:center;">
         <span id="friendScreenStatus" style="font-size:11px;color:#64748b;"></span>
+        <button onclick="toggleFullscreen('friendScreenImg')"
+          style="background:none;border:1px solid #334155;border-radius:8px;color:#94a3b8;padding:5px 12px;cursor:pointer;font-size:13px;">⛶ Vollbild</button>
         <button onclick="closeFriendScreen()"
           style="background:none;border:1px solid #334155;border-radius:8px;color:#94a3b8;padding:5px 12px;cursor:pointer;font-size:13px;">
           ✕ Schließen
         </button>
       </div>
     </div>
-    <img id="friendScreenImg" src="" alt="Freund Bildschirm wird geladen...">
+    <div id="friendMonitorPicker" style="display:flex;gap:6px;padding:6px 0 2px;flex-wrap:wrap;"></div>
+    <img id="friendScreenImg" src="" alt="Freund Bildschirm wird geladen..." ondblclick="toggleFullscreen('friendScreenImg')">
+  </div>
+</div>
+
+<!-- SETTINGS OVERLAY -->
+<div class="overlay" id="settingsOverlay" onclick="closeOverlay('settingsOverlay')">
+  <div class="sheet" onclick="event.stopPropagation()">
+    <div class="sheet-handle"></div>
+    <h2>⚙️ Einstellungen</h2>
+    <div class="lbl" style="margin-top:12px;">Neues Passwort <span style="color:#555;font-weight:400;">(leer = keine Änderung)</span></div>
+    <input type="password" id="setPw" placeholder="Neues Passwort..." autocomplete="new-password"
+      style="width:100%;background:var(--bg3);border:1px solid var(--border);border-radius:12px;padding:11px 14px;color:var(--text);font-size:15px;outline:none;box-sizing:border-box;margin-top:6px;">
+    <div class="lbl" style="margin-top:14px;">Freunde <span style="color:#555;font-weight:400;">(Name|http://IP:5000, eine pro Zeile)</span></div>
+    <textarea id="setFriends" rows="4" placeholder="Alice|http://100.x.x.x:5000&#10;Bob|http://100.y.y.y:5000"
+      style="width:100%;background:var(--bg3);border:1px solid var(--border);border-radius:12px;padding:11px 14px;color:var(--text);font-size:14px;outline:none;box-sizing:border-box;margin-top:6px;resize:vertical;font-family:monospace;"></textarea>
+    <div id="settingsMsg" style="font-size:13px;color:#5eead4;min-height:18px;margin-top:8px;"></div>
+    <div style="display:flex;gap:8px;margin-top:14px;">
+      <button onclick="closeOverlay('settingsOverlay')"
+        style="flex:1;padding:12px;border-radius:12px;border:1px solid var(--border);background:none;color:var(--text-muted);cursor:pointer;font-size:14px;">Abbrechen</button>
+      <button onclick="saveSettings()"
+        style="flex:2;padding:12px;border-radius:12px;border:none;background:var(--green);color:#000;cursor:pointer;font-size:14px;font-weight:600;">Speichern</button>
+    </div>
   </div>
 </div>
 
@@ -1441,6 +1553,7 @@ async function updateStatus() {
 }
 updateStatus();
 setInterval(updateStatus, 5000);
+loadFriends();
 
 // ── TIMER ────────────────────────────────────────────────────────
 let _knownTimers = {};  // id → {label, duration} für Abschluss-Erkennung
@@ -1539,10 +1652,35 @@ function runCommand(msg) {
 // ── SCREEN OVERLAY ───────────────────────────────────────────────
 let _screenActive = false;
 
-function showScreen() {
+async function showScreen() {
   _screenActive = true;
   document.getElementById('screenOverlay').classList.add('show');
   document.getElementById('screenImg').src = '/api/screen?' + Date.now();
+  await loadMonitorPicker();
+}
+
+async function loadMonitorPicker() {
+  try {
+    const r = await fetch('/api/screen/monitors');
+    const d = await r.json();
+    const picker = document.getElementById('monitorPicker');
+    picker.innerHTML = '';
+    d.monitors.forEach(m => {
+      const btn = document.createElement('button');
+      btn.textContent = m.label;
+      btn.dataset.idx = m.idx;
+      btn.style.cssText = 'padding:4px 10px;border-radius:8px;font-size:12px;cursor:pointer;border:1px solid ' +
+        (m.idx === d.active ? '#38bdf8;background:#0ea5e9;color:#fff;font-weight:600;' : '#334155;background:none;color:#94a3b8;');
+      btn.onclick = () => selectMonitor(m.idx);
+      picker.appendChild(btn);
+    });
+  } catch(e) {}
+}
+
+async function selectMonitor(idx) {
+  await fetch('/api/screen/monitor', {method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({idx})});
+  document.getElementById('screenImg').src = '/api/screen?' + Date.now();
+  await loadMonitorPicker();
 }
 
 function closeScreen() {
@@ -1599,35 +1737,221 @@ async function triggerJumpscare() {
   }
 }
 
-// ── FREUND AKTIONEN ──────────────────────────────────────────────
-async function triggerFriendJumpscare() {
+// ── FREUNDE (dynamisch) ──────────────────────────────────────────
+let _friends = [];
+
+async function loadFriends() {
   try {
-    const r = await fetch('/api/friend/jumpscare', {method: 'POST'});
+    const r = await fetch('/api/friends');
     const d = await r.json();
-    if (d.ok) {
-      addMsg('👻 Jumpscare an Freund gesendet!', 'sys');
-    } else {
-      addMsg('⛔ Freund hat Admin-Zugriff nicht aktiviert.', 'sys');
+    _friends = d.friends || [];
+  } catch(e) {}
+}
+
+function renderFriendsList() {
+  const list = document.getElementById('friendsList');
+  if (!list) return;
+  list.innerHTML = '';
+  if (!_friends.length) {
+    list.innerHTML = '<div style="color:var(--text2);font-size:14px;text-align:center;padding:16px;">Keine Freunde eingetragen.<br>Gehe zu Settings um Freunde hinzuzufügen.</div>';
+    return;
+  }
+  _friends.forEach(f => {
+    const row = document.createElement('div');
+    row.style.cssText = 'display:flex;gap:8px;align-items:center;margin-bottom:12px;padding:10px 12px;background:var(--bg3);border:1px solid var(--border);border-radius:14px;';
+    row.id = `friendRow_${f.idx}`;
+    row.innerHTML = `
+      <div style="flex:1;min-width:0;">
+        <div style="font-size:15px;font-weight:600;">${f.name}</div>
+        <div id="friendStatus_${f.idx}" style="font-size:12px;color:var(--text2);margin-top:2px;">⏳ Prüfe...</div>
+      </div>
+      <button onclick="triggerFriendJumpscare(${f.idx},'${f.name}')" id="friendScareBtn_${f.idx}"
+        style="padding:8px 12px;background:var(--bg3);border:1px solid #f59e0b;border-radius:10px;color:#fbbf24;font-size:13px;cursor:pointer;opacity:.4;" disabled>👻</button>
+      <button onclick="closeOverlay('friendsOverlay');showFriendScreen(${f.idx},'${f.name}')" id="friendScreenBtn_${f.idx}"
+        style="padding:8px 12px;background:var(--bg3);border:1px solid #0ea5e9;border-radius:10px;color:#38bdf8;font-size:13px;cursor:pointer;opacity:.4;" disabled>🖥️</button>`;
+    list.appendChild(row);
+    fetchFriendInfo(f.idx);
+  });
+}
+
+async function fetchFriendInfo(idx) {
+  const statusEl = document.getElementById(`friendStatus_${idx}`);
+  const scareBtn = document.getElementById(`friendScareBtn_${idx}`);
+  const screenBtn = document.getElementById(`friendScreenBtn_${idx}`);
+  try {
+    const r = await fetch(`/api/friend/${idx}/info`);
+    const d = await r.json();
+    if (!d.online) {
+      statusEl.innerHTML = '<span style="color:#ef4444;">● Offline</span>';
+      return;
     }
+    const adminTxt = d.admin_access
+      ? '<span style="color:#4ade80;">✓ Admin-Zugriff aktiv</span>'
+      : '<span style="color:#94a3b8;">✗ Admin-Zugriff gesperrt</span>';
+    statusEl.innerHTML = '<span style="color:#4ade80;">● Online</span> · ' + adminTxt;
+    scareBtn.disabled = false; scareBtn.style.opacity = '1';
+    if (d.admin_access) { screenBtn.disabled = false; screenBtn.style.opacity = '1'; }
   } catch(e) {
-    addMsg('Freund nicht erreichbar 😢', 'sys');
+    statusEl.innerHTML = '<span style="color:#ef4444;">● Offline</span>';
   }
 }
 
+function showFriends() {
+  renderFriendsList();
+  document.getElementById('friendsEditArea').style.display = 'none';
+  document.getElementById('friendsOverlay').classList.add('show');
+}
+
+function toggleFriendsEdit() {
+  const area = document.getElementById('friendsEditArea');
+  const open = area.style.display !== 'none';
+  if (open) {
+    area.style.display = 'none';
+  } else {
+    document.getElementById('friendsEditInput').value =
+      (_friends.map(f => f.name + '|' + (f.url || '')).join('\\n'));
+    document.getElementById('friendsEditMsg').textContent = '';
+    area.style.display = '';
+  }
+}
+
+async function saveFriendsEdit() {
+  const raw = document.getElementById('friendsEditInput').value
+                .split('\\n').map(s => s.trim()).filter(Boolean).join(',');
+  const msg = document.getElementById('friendsEditMsg');
+  msg.textContent = 'Speichere...';
+  try {
+    const r = await fetch('/api/settings', {
+      method: 'POST',
+      headers: {'Content-Type':'application/json'},
+      body: JSON.stringify({friends: raw})
+    });
+    const d = await r.json();
+    if (d.ok) {
+      msg.textContent = 'Gespeichert ✓';
+      await loadFriends();
+      renderFriendsList();
+      setTimeout(() => { document.getElementById('friendsEditArea').style.display = 'none'; }, 800);
+    } else {
+      msg.style.color = '#f87171';
+      msg.textContent = 'Fehler beim Speichern.';
+    }
+  } catch(e) {
+    msg.style.color = '#f87171';
+    msg.textContent = 'Verbindungsfehler.';
+  }
+}
+
+function toggleFullscreen(imgId) {
+  const el = document.getElementById(imgId);
+  if (!document.fullscreenElement) {
+    el.requestFullscreen && el.requestFullscreen();
+  } else {
+    document.exitFullscreen && document.exitFullscreen();
+  }
+}
+
+async function triggerFriendJumpscare(idx, name) {
+  try {
+    const r = await fetch(`/api/friend/${idx}/jumpscare`, {method: 'POST'});
+    const d = await r.json();
+    addMsg(d.ok ? `👻 Jumpscare an ${name} gesendet!` : `⛔ ${name}: ${d.error || 'Admin-Zugriff nicht aktiviert.'}`, 'sys');
+  } catch(e) {
+    addMsg(`${name} nicht erreichbar 😢`, 'sys');
+  }
+}
+
+async function scareAll() {
+  if (!_friends.length) return;
+  closeOverlay('friendsOverlay');
+  addMsg('👻 Scare an alle Freunde...', 'sys');
+  await Promise.all(_friends.map(f => triggerFriendJumpscare(f.idx, f.name)));
+}
+
 let _friendScreenActive = false;
-function showFriendScreen() {
+let _friendScreenIdx = 0;
+
+async function showFriendScreen(idx, name) {
   _friendScreenActive = true;
+  _friendScreenIdx = idx;
+  document.getElementById('friendScreenTitle').textContent = `🖥️ ${name} – Bildschirm Live`;
   document.getElementById('friendScreenStatus').textContent = 'Verbinde...';
+  document.getElementById('friendMonitorPicker').innerHTML = '';
   document.getElementById('friendScreenOverlay').classList.add('show');
   const img = document.getElementById('friendScreenImg');
-  img.src = '/api/friend/screen?' + Date.now();
-  img.onload = () => { document.getElementById('friendScreenStatus').textContent = 'Live'; };
+  img.src = `/api/friend/${idx}/screen?` + Date.now();
+  img.onload  = () => { document.getElementById('friendScreenStatus').textContent = 'Live'; };
   img.onerror = () => { document.getElementById('friendScreenStatus').textContent = '⛔ Kein Zugriff'; img.src = ''; };
+  await loadFriendMonitorPicker(idx);
 }
+
+async function loadFriendMonitorPicker(idx) {
+  try {
+    const r = await fetch(`/api/friend/${idx}/screen/monitors`);
+    const d = await r.json();
+    const picker = document.getElementById('friendMonitorPicker');
+    picker.innerHTML = '';
+    (d.monitors || []).forEach(m => {
+      const btn = document.createElement('button');
+      btn.textContent = m.label;
+      btn.style.cssText = 'padding:4px 10px;border-radius:8px;font-size:12px;cursor:pointer;border:1px solid ' +
+        (m.idx === d.active ? '#fbbf24;background:#f59e0b;color:#000;font-weight:600;' : '#334155;background:none;color:#94a3b8;');
+      btn.onclick = () => selectFriendMonitor(idx, m.idx);
+      picker.appendChild(btn);
+    });
+  } catch(e) {}
+}
+
+async function selectFriendMonitor(friendIdx, monIdx) {
+  await fetch(`/api/friend/${friendIdx}/screen/monitor`, {method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({idx: monIdx})});
+  const img = document.getElementById('friendScreenImg');
+  img.src = `/api/friend/${friendIdx}/screen?` + Date.now();
+  await loadFriendMonitorPicker(friendIdx);
+}
+
 function closeFriendScreen() {
   _friendScreenActive = false;
   document.getElementById('friendScreenOverlay').classList.remove('show');
   setTimeout(() => { if (!_friendScreenActive) document.getElementById('friendScreenImg').src = ''; }, 300);
+}
+
+// ── SETTINGS ─────────────────────────────────────────────────────
+async function showSettings() {
+  try {
+    const r = await fetch('/api/settings');
+    const d = await r.json();
+    document.getElementById('setFriends').value =
+      (d.friends || '').split(',').map(s => s.trim()).filter(Boolean).join('\\n');
+  } catch(e) {}
+  document.getElementById('setPw').value = '';
+  document.getElementById('settingsMsg').style.color = '#5eead4';
+  document.getElementById('settingsMsg').textContent = '';
+  document.getElementById('settingsOverlay').classList.add('show');
+}
+
+async function saveSettings() {
+  const pw      = document.getElementById('setPw').value.trim();
+  const friends = document.getElementById('setFriends').value
+                    .split('\\n').map(s => s.trim()).filter(Boolean).join(',');
+  const msg = document.getElementById('settingsMsg');
+  msg.textContent = 'Speichere...';
+  try {
+    const r = await fetch('/api/settings', {
+      method: 'POST',
+      headers: {'Content-Type':'application/json'},
+      body: JSON.stringify({password: pw, friends})
+    });
+    const d = await r.json();
+    if (d.ok) {
+      msg.textContent = 'Gespeichert ✓';
+      await loadFriends();
+      setTimeout(() => closeOverlay('settingsOverlay'), 800);
+    } else {
+      msg.style.color = '#fca5a5'; msg.textContent = 'Fehler';
+    }
+  } catch(e) {
+    msg.style.color = '#fca5a5'; msg.textContent = 'Verbindungsfehler';
+  }
 }
 
 // ── SPOTIFY ─────────────────────────────────────────────────────
@@ -2328,10 +2652,10 @@ def manifest():
 @login_required
 def status():
     try:
-        r = req.get(f"{CORE_URL}/status", timeout=2)
+        r = req.get(f"{CORE_URL}/status", timeout=(3, 5))
         return jsonify(r.json())
     except:
-        cpu  = psutil.cpu_percent(interval=0.5)
+        cpu  = psutil.cpu_percent()
         ram  = psutil.virtual_memory().percent
         time = datetime.datetime.now().strftime('%H:%M')
         return jsonify(cpu=cpu, ram=ram, time=time, gpu=None)
@@ -2506,50 +2830,105 @@ def commands_list():
     return jsonify(commands=COMMANDS)
 
 # ── SCREEN STREAMING ──────────────────────────────────────────────
-_screen_lock = threading.Lock()
+_latest_frame: bytes | None = None
+_frame_lock     = threading.Lock()
+_capture_active = False
+_screen_viewers = 0
+_viewers_lock   = threading.Lock()
+_selected_monitor = 1  # 1 = erster echter Monitor (mss: 0 = alle zusammen)
+_monitor_lock   = threading.Lock()
+
+def _capture_daemon():
+    """Hintergrund-Thread: läuft nur solange jemand den Screen anschaut."""
+    global _latest_frame, _capture_active
+    target_interval = 1.0 / 25  # ~25 FPS
+    sct = _mss_lib.mss() if _SCREEN_BACKEND == 'mss' else None
+    while True:
+        with _viewers_lock:
+            if _screen_viewers == 0:
+                _capture_active = False
+                break
+        t0 = _time.monotonic()
+        try:
+            if _SCREEN_BACKEND == 'mss':
+                with _monitor_lock:
+                    mon_idx = _selected_monitor
+                monitors = sct.monitors
+                mon = monitors[mon_idx] if mon_idx < len(monitors) else monitors[1]
+                raw = sct.grab(mon)
+                img = _PilImage.frombytes('RGB', raw.size, raw.bgra, 'raw', 'BGRX')
+            else:
+                img = ImageGrab.grab()
+            w, h = img.size
+            nw = min(w, 1920)
+            nh = int(h * nw / w)
+            if (nw, nh) != (w, h):
+                img = img.resize((nw, nh))
+            buf = io.BytesIO()
+            img.save(buf, format='JPEG', quality=72, optimize=False)
+            with _frame_lock:
+                _latest_frame = buf.getvalue()
+        except Exception:
+            pass
+        elapsed = _time.monotonic() - t0
+        wait = target_interval - elapsed
+        if wait > 0:
+            _time.sleep(wait)
+    if sct:
+        sct.close()
+
+def _ensure_capture_running():
+    global _capture_active
+    with _viewers_lock:
+        if not _capture_active and _SCREEN_OK:
+            _capture_active = True
+            threading.Thread(target=_capture_daemon, daemon=True).start()
 
 def _screen_generator():
-    """MJPEG-Generator: ~25 FPS mit mss, ~12 FPS Fallback mit PIL."""
-    if _MSS_OK:
-        with _mss_module.mss() as sct:
-            monitor = sct.monitors[0]
-            while True:
-                try:
-                    with _screen_lock:
-                        shot = sct.grab(monitor)
-                    img = _PilImage.frombytes('RGB', (shot.width, shot.height),
-                                             shot.bgra, 'raw', 'BGRX')
-                    w, h = img.size
-                    new_w = min(w, 1280)
-                    new_h = int(h * new_w / w)
-                    if (new_w, new_h) != (w, h):
-                        img = img.resize((new_w, new_h))
-                    buf = io.BytesIO()
-                    img.save(buf, format='JPEG', quality=62)
-                    frame = buf.getvalue()
-                    yield (b'--frame\r\nContent-Type: image/jpeg\r\n\r\n' + frame + b'\r\n')
-                except Exception:
-                    pass
-                _time.sleep(0.04)   # ~25 FPS
-    else:
+    """MJPEG-Generator: startet Capture beim ersten Zuschauer, stoppt wenn keiner mehr schaut."""
+    global _screen_viewers
+    with _viewers_lock:
+        _screen_viewers += 1
+    _ensure_capture_running()
+    try:
         while True:
-            if not _SCREEN_OK:
-                break
-            try:
-                with _screen_lock:
-                    img = ImageGrab.grab()
-                w, h = img.size
-                new_w = min(w, 1280)
-                new_h = int(h * new_w / w)
-                if (new_w, new_h) != (w, h):
-                    img = img.resize((new_w, new_h))
-                buf = io.BytesIO()
-                img.save(buf, format='JPEG', quality=62)
-                frame = buf.getvalue()
+            with _frame_lock:
+                frame = _latest_frame
+            if frame:
                 yield (b'--frame\r\nContent-Type: image/jpeg\r\n\r\n' + frame + b'\r\n')
-            except Exception:
-                pass
-            _time.sleep(0.083)  # ~12 FPS
+            _time.sleep(0.04)
+    finally:
+        with _viewers_lock:
+            _screen_viewers = max(0, _screen_viewers - 1)
+
+@app.route('/api/screen/monitors')
+@login_required
+def screen_monitors():
+    """Gibt alle verfügbaren Monitore zurück."""
+    if not _SCREEN_OK or _SCREEN_BACKEND != 'mss':
+        return jsonify(monitors=[{'idx': 1, 'label': 'Monitor 1'}])
+    try:
+        with _mss_lib.mss() as sct:
+            result = []
+            for i, m in enumerate(sct.monitors):
+                if i == 0:
+                    continue  # Index 0 = alle zusammen, überspringen
+                result.append({'idx': i, 'label': f'Monitor {i}  ({m["width"]}×{m["height"]})'})
+        with _monitor_lock:
+            active = _selected_monitor
+        return jsonify(monitors=result, active=active)
+    except Exception as e:
+        return jsonify(monitors=[{'idx': 1, 'label': 'Monitor 1'}], active=1)
+
+@app.route('/api/screen/monitor', methods=['POST'])
+@login_required
+def screen_set_monitor():
+    """Setzt den aktiven Monitor für den Stream."""
+    global _selected_monitor
+    idx = request.get_json(force=True).get('idx', 1)
+    with _monitor_lock:
+        _selected_monitor = int(idx)
+    return jsonify(ok=True, active=_selected_monitor)
 
 @app.route('/api/screen')
 @login_required
@@ -2561,26 +2940,41 @@ def screen_stream():
 
 # ── FREUND PROXY ROUTEN ────────────────────────────────────────────
 
-@app.route('/api/friend/jumpscare', methods=['POST'])
+@app.route('/api/friend/<int:idx>/info')
 @login_required
-def friend_jumpscare():
-    """Sendet Jumpscare an Freund (nur wenn Freund Admin-Zugriff aktiviert hat)."""
-    if "HIER_FREUND_IP" in FRIEND_URL:
-        return jsonify(ok=False, error="FRIEND_URL nicht konfiguriert.")
+def friend_info(idx):
+    """Prüft ob Freund online ist und ob Admin-Zugriff aktiv."""
+    if idx >= len(FRIENDS):
+        return jsonify(online=False, admin_access=False), 404
+    url = FRIENDS[idx]['url']
     try:
-        r = req.post(f"{FRIEND_URL}/api/admin/jumpscare", timeout=5)
+        r = req.get(f"{url}/api/admin/info", timeout=3)
+        return jsonify(r.json())
+    except Exception:
+        return jsonify(online=False, admin_access=False)
+
+@app.route('/api/friend/<int:idx>/jumpscare', methods=['POST'])
+@login_required
+def friend_jumpscare(idx):
+    """Sendet Jumpscare an Freund idx."""
+    if idx >= len(FRIENDS):
+        return jsonify(ok=False, error="Unbekannter Freund."), 404
+    url = FRIENDS[idx]['url']
+    try:
+        r = req.post(f"{url}/api/admin/jumpscare", timeout=5)
         return jsonify(r.json())
     except Exception as e:
         return jsonify(ok=False, error=str(e))
 
-@app.route('/api/friend/screen')
+@app.route('/api/friend/<int:idx>/screen')
 @login_required
-def friend_screen():
-    """Streamt den Bildschirm des Freundes (nur wenn Freund Admin-Zugriff aktiviert hat)."""
-    if "HIER_FREUND_IP" in FRIEND_URL:
-        return jsonify(error="FRIEND_URL nicht konfiguriert."), 503
+def friend_screen(idx):
+    """Streamt den Bildschirm von Freund idx."""
+    if idx >= len(FRIENDS):
+        return jsonify(error="Unbekannter Freund."), 404
+    url = FRIENDS[idx]['url']
     try:
-        r = req.get(f"{FRIEND_URL}/api/admin/screen", stream=True, timeout=10)
+        r = req.get(f"{url}/api/admin/screen", stream=True, timeout=10)
         if r.status_code == 403:
             return jsonify(error="Freund hat Zugriff nicht erlaubt."), 403
         return Response(
@@ -2589,6 +2983,31 @@ def friend_screen():
         )
     except Exception as e:
         return jsonify(error=str(e)), 503
+
+@app.route('/api/friend/<int:idx>/screen/monitors')
+@login_required
+def friend_screen_monitors(idx):
+    if idx >= len(FRIENDS):
+        return jsonify(monitors=[], active=1), 404
+    url = FRIENDS[idx]['url']
+    try:
+        r = req.get(f"{url}/api/admin/screen/monitors", timeout=5)
+        return jsonify(r.json())
+    except Exception as e:
+        return jsonify(monitors=[{'idx': 1, 'label': 'Monitor 1'}], active=1)
+
+@app.route('/api/friend/<int:idx>/screen/monitor', methods=['POST'])
+@login_required
+def friend_screen_set_monitor(idx):
+    if idx >= len(FRIENDS):
+        return jsonify(ok=False), 404
+    url = FRIENDS[idx]['url']
+    try:
+        data = request.get_json(force=True)
+        r = req.post(f"{url}/api/admin/screen/monitor", json=data, timeout=5)
+        return jsonify(r.json())
+    except Exception as e:
+        return jsonify(ok=False, error=str(e))
 
 
 # ── WINDOWS NOTIFICATION ──────────────────────────────────────────

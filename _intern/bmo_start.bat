@@ -14,7 +14,18 @@ echo   Core + Web werden gestartet...
 echo  ========================================
 echo.
 
-:: Gespeicherten Python-Pfad aus bmo_python.txt lesen (von SETUP_EINMALIG.bat gesetzt)
+:: Beim ersten Start: SETUP_EINMALIG.bat ausfuehren lassen
+if not exist "%~dp0..\bmo_python.txt" (
+    echo   ========================================
+    echo   ERSTER START: Bitte zuerst
+    echo   SETUP_EINMALIG.bat ausfuehren!
+    echo   ========================================
+    echo.
+    pause
+    exit /b
+)
+
+:: Gespeicherten Python-Pfad laden
 set "PYEXE="
 if exist "%~dp0bmo_python.txt" (
   set /p PYEXE=<"%~dp0bmo_python.txt"

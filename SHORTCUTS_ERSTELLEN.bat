@@ -17,7 +17,7 @@ echo.
 set "DIR=%~dp0"
 
 :: Shortcut: Einmaliges Setup (gelb)
-powershell -NoProfile -Command "$ws=New-Object -ComObject WScript.Shell; $sc=$ws.CreateShortcut('%DIR%BMO Setup (Einmalig).lnk'); $sc.TargetPath='%DIR%_intern\SETUP_EINMALIG.bat'; $sc.WorkingDirectory='%DIR%'; $sc.IconLocation='%SystemRoot%\system32\shell32.dll,46'; $sc.Description='Einmalig ausfuehren: Pakete installieren und Python-Pfad speichern'; $sc.Save()"
+powershell -NoProfile -Command "$ws=New-Object -ComObject WScript.Shell; $sc=$ws.CreateShortcut('%DIR%BMO Setup (Einmalig).lnk'); $sc.TargetPath='%DIR%_intern\SETUP_EINMALIG.bat'; $sc.WorkingDirectory='%DIR%_intern'; $sc.IconLocation='%SystemRoot%\system32\shell32.dll,46'; $sc.Description='Einmalig ausfuehren: Pakete installieren und Python-Pfad speichern'; $sc.Save()"
 
 :: Shortcut: BMO Starten (gruen — Shell-Icon 137)
 powershell -NoProfile -Command "$ws=New-Object -ComObject WScript.Shell; $sc=$ws.CreateShortcut('%DIR%BMO Starten.lnk'); $sc.TargetPath='%DIR%_intern\bmo_start.bat'; $sc.WorkingDirectory='%DIR%'; $sc.IconLocation='%SystemRoot%\system32\shell32.dll,137'; $sc.Description='BMO Core und Web starten'; $sc.Save()"

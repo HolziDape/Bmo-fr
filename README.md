@@ -73,55 +73,32 @@ Bmo/
 
 ### Schritt 2 · Repo klonen
 
+**CMD im richtigen Ordner öffnen:**
+1. Navigiere im Explorer zu dem Ordner, wo BMO installiert werden soll (z.B. `C:\Users\deinName\Desktop`)
+2. Klicke in die **Adressleiste** des Explorer-Fensters → tippe `cmd` → Enter
+3. Im CMD-Fenster:
+
 ```bash
 git clone https://github.com/HolziDape/Bmo-fr.git
 cd Bmo-fr
 ```
 
+Alternativ als ZIP: **Code → Download ZIP** → entpacken.
+
 ### Schritt 3 · Abhängigkeiten installieren
 
-**Core + Web** (Pflicht):
-```bash
-pip install flask flask-cors requests psutil feedparser pillow
-```
+Einfach `SHORTCUTS_ERSTELLEN.bat` doppelklicken — das erstellt alle Verknüpfungen.
+Dann **BMO Starten** doppelklicken — beim ersten Mal werden alle Pakete automatisch installiert.
 
-**Desktop-GUI** *(optional — nur wenn du das animierte Fenster willst)*:
-```bash
-pip install pygame sounddevice soundfile speechrecognition openwakeword
-```
+### Schritt 4 · Starten
 
-**Spotify-Steuerung** *(optional — nur wenn du Spotify nutzen willst)*:
-```bash
-pip install spotipy
-```
+Doppelklick auf **BMO Starten.lnk** — beim ersten Mal installiert es alles automatisch, dann startet BMO.
+Beim allerersten Start öffnet sich `http://localhost:5000/setup` — dort das Login-Passwort setzen.
 
-> 💡 Alles auf einmal:
-> ```bash
-> pip install flask flask-cors requests psutil feedparser pillow pygame sounddevice soundfile speechrecognition openwakeword spotipy
-> ```
-
-### Schritt 4 · Modelle
-
-Die Modell-Dateien sind bereits im Repo enthalten und werden beim Klonen automatisch mitgeladen:
-
-| Datei | Beschreibung |
+| Was | Verknüpfung |
 |---|---|
-| `models/hey_bmo.onnx` | Wake-Word Modell |
-| `models/BMO_500e_7000s.pth` | RVC Stimm-Modell |
-| `models/BMO.index` | RVC Voice Index |
-
-> ⚠️ Ohne RVC-Modell spricht BMO nicht. Core startet aber trotzdem — er gibt dann Texte ohne Audio zurück.
-
-### Schritt 5 · Starten
-
-| Was | Doppelklick auf |
-|---|---|
-| Core + Web (Hintergrund, empfohlen) | `bmo_start.bat` |
-| Desktop-GUI mit Wake-Word | `bmo_desktop.bat` |
-
-`bmo_start.bat` startet den Watchdog, der Core und Web automatisch überwacht und bei Absturz neu startet.
-
-> 💡 **Erster Start:** Beim allerersten Start öffnet sich automatisch `http://localhost:5000/setup` im Browser — dort kannst du dein Login-Passwort direkt im Web-Interface setzen. Es wird in `bmo_config.txt` gespeichert und danach nie wieder abgefragt.
+| Core + Web (Hintergrund, empfohlen) | `BMO Starten.lnk` |
+| Desktop-GUI mit Wake-Word | `BMO Desktop.lnk` |
 
 **Oder manuell:**
 ```bash
@@ -135,7 +112,7 @@ python bmo_web.py
 python bmo_desktop.py
 ```
 
-### Schritt 6 · Öffnen
+### Schritt 5 · Öffnen
 
 | Interface | URL |
 |---|---|
@@ -155,9 +132,9 @@ Willst du es nachträglich ändern, einfach `bmo_config.txt` öffnen und die Zei
 WEB_PASSWORD=deinNeuesPasswort
 ```
 
-Die Tailscale-IP des Freundes direkt in `bmo_web.py` eintragen *(nur für F.Scare / F.Screen nötig)*:
-```python
-FRIEND_URL = "http://HIER_FREUND_IP:5000"
+Die Tailscale-IP des Freundes in `bmo_config.txt` eintragen *(nur für F.Scare / F.Screen nötig)*:
+```
+FRIEND_URL=http://100.x.x.x:5000
 ```
 
 ### bmo_desktop.py
@@ -234,9 +211,9 @@ Der Admin kann optional auf bestimmte Dinge beim Freund zugreifen — **aber nur
 3. Freund kann Zugriff jederzeit wieder deaktivieren
 
 **Admin-Setup:**
-In `bmo_web.py` die Tailscale-IP des Freundes eintragen:
-```python
-FRIEND_URL = "http://100.x.x.x:5000"   # ← Tailscale-IP des Freundes
+In `bmo_config.txt` die Tailscale-IP des Freundes eintragen:
+```
+FRIEND_URL=http://100.x.x.x:5000
 ```
 
 ---
