@@ -1629,6 +1629,13 @@ HTML = """<!DOCTYPE html>
     </div>
     <canvas id="pongCanvas" width="600" height="380"></canvas>
     <div class="pong-info" id="pongInfo">Verbinde...</div>
+    <div id="pongChallengeBanner" style="display:none;margin-top:10px;padding:12px;background:#1e3a2f;border:1px solid #4ade80;border-radius:12px;text-align:center;">
+      <div style="color:#4ade80;font-size:15px;margin-bottom:8px;">🏓 Dein Freund fordert dich heraus!</div>
+      <button onclick="acceptPongChallenge()"
+        style="padding:10px 24px;background:#4ade80;border:none;border-radius:10px;color:#000;font-size:14px;font-weight:700;cursor:pointer;">
+        ✅ Annehmen
+      </button>
+    </div>
     <div style="display:flex;gap:8px;margin-top:10px;">
       <button onclick="pongReset()"
         style="flex:1;padding:12px;background:var(--bg3);border:1px solid var(--border);border-radius:12px;color:var(--text);font-size:14px;cursor:pointer;">
@@ -2853,6 +2860,23 @@ function closePong() {
   if (_pongPoll) clearInterval(_pongPoll);
   document.getElementById('pongOverlay').classList.remove('show');
 }
+function acceptPongChallenge() {
+  document.getElementById('pongChallengeBanner').style.display = 'none';
+  showPong(false);
+}
+
+// Polling: prüfen ob Freund uns herausfordert
+setInterval(async () => {
+  try {
+    const r = await fetch('/api/pong/pending');
+    const d = await r.json();
+    if (d.pending) {
+      document.getElementById('pongChallengeBanner').style.display = 'block';
+      document.getElementById('pongOverlay').classList.add('show');
+    }
+  } catch(e) {}
+}, 5000);
+
 async function pongReset() {
   closePong();
   await new Promise(r => setTimeout(r, 200));
@@ -3564,6 +3588,8 @@ def draw_monitors():
 # ── PONG GAME ─────────────────────────────────────────────────────
 import random as _random
 _pong_lock = threading.Lock()
+_pong_pending = False
+_pong_pending_lock = threading.Lock()
 _pong = {
     'ball':        {'x': 0.5, 'y': 0.5, 'vx': 0.014, 'vy': 0.008},
     'left':        0.5, 'left_prev':  0.5,
@@ -3688,17 +3714,31 @@ def pong_reset():
 @app.route('/api/pong/challenge', methods=['POST'])
 @login_required
 def pong_challenge():
-    """Freund fordert uns heraus — schicke Notification und markiere right_human."""
+    """Freund fordert uns heraus — Pong starten und pending setzen."""
+    global _pong_pending
     with _pong_lock:
         _pong['right_human'] = True
-    # Notification an PC
+        if not _pong['running']:
+            _pong['running'] = True
+            threading.Thread(target=_pong_loop, daemon=True).start()
+    with _pong_pending_lock:
+        _pong_pending = True
     try:
         from winotify import Notification
-        toast = Notification(app_id="BMO", title="🏓 Pong-Challenge!", msg="Dein Freund fordert dich heraus!")
+        toast = Notification(app_id="BMO", title="🏓 Pong-Challenge!", msg="Dein Freund fordert dich heraus! BMO öffnen um anzunehmen.")
         toast.show()
     except Exception:
         pass
     return jsonify(ok=True)
+
+@app.route('/api/pong/pending')
+@login_required
+def pong_pending():
+    global _pong_pending
+    with _pong_pending_lock:
+        p = _pong_pending
+        _pong_pending = False
+    return jsonify(pending=p)
 
 @app.route('/api/friend/<int:idx>/pong/state')
 @login_required
