@@ -2828,7 +2828,7 @@ async function challengeFriendPong(idx) {
     const r = await fetch(`/api/friend/${_selectedFriendIdx}/pong/challenge`, {method:'POST'});
     const d = await r.json();
     if (d.ok) {
-      showPong(true);
+      showPong(false);  // Admin = linkes Paddle, Pong starten
     } else {
       addMsg('⛔ ' + (d.error || 'Pong-Herausforderung fehlgeschlagen.'), 'sys');
     }
