@@ -3915,12 +3915,21 @@ def admin_pong_paddle():
 
 @app.route('/api/admin/pong/challenge', methods=['POST'])
 def admin_pong_challenge():
+    global _pong_pending
     _admin_check()
     with _pong_lock:
         _pong['right_human'] = True
         if not _pong['running']:
             _pong['running'] = True
             threading.Thread(target=_pong_loop, daemon=True).start()
+    with _pong_pending_lock:
+        _pong_pending = True
+    try:
+        from winotify import Notification
+        toast = Notification(app_id="BMO", title="🏓 Pong-Challenge!", msg="Dein Freund fordert dich heraus! BMO öffnen um anzunehmen.")
+        toast.show()
+    except Exception:
+        pass
     return jsonify(ok=True)
 
 @app.route('/api/admin/jumpscare', methods=['POST'])
