@@ -1457,31 +1457,54 @@ HTML = """<!DOCTYPE html>
 <div class="overlay" id="freundeOverlay" onclick="closeOverlay('freundeOverlay')">
   <div class="sheet" onclick="event.stopPropagation()">
     <div class="sheet-handle"></div>
-    <h2>👥 Freund Aktionen</h2>
+    <h2 id="freundeOverlayTitle">👥 Freund Aktionen</h2>
     <p style="color:var(--text2);font-size:13px;margin-bottom:18px;">Alles was du mit deinem Freund machen kannst.</p>
     <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px;">
-      <button onclick="showFriendScreen();closeOverlay('freundeOverlay')"
+      <button onclick="closeOverlay('freundeOverlay');showFriendScreen(_selectedFriendIdx,_selectedFriendName)"
         style="padding:16px 12px;background:var(--bg3);border:1px solid #0ea5e9;border-radius:14px;color:#38bdf8;font-size:14px;cursor:pointer;display:flex;flex-direction:column;align-items:center;gap:6px;">
         <span style="font-size:22px;">🖥️</span>Screen ansehen
       </button>
-      <button onclick="triggerFriendJumpscare();closeOverlay('freundeOverlay')"
+      <button onclick="triggerFriendJumpscare(_selectedFriendIdx,_selectedFriendName);closeOverlay('freundeOverlay')"
         style="padding:16px 12px;background:var(--bg3);border:1px solid #ef4444;border-radius:14px;color:#f87171;font-size:14px;cursor:pointer;display:flex;flex-direction:column;align-items:center;gap:6px;">
         <span style="font-size:22px;">👻</span>Jumpscare
       </button>
-      <button onclick="showFreundNotify();closeOverlay('freundeOverlay')"
+      <button onclick="closeOverlay('freundeOverlay');showFreundNotify(_selectedFriendIdx)"
         style="padding:16px 12px;background:var(--bg3);border:1px solid #06b6d4;border-radius:14px;color:#22d3ee;font-size:14px;cursor:pointer;display:flex;flex-direction:column;align-items:center;gap:6px;">
         <span style="font-size:22px;">🔔</span>Notification
       </button>
-      <button onclick="showFreundProcesses();closeOverlay('freundeOverlay')"
+      <button onclick="closeOverlay('freundeOverlay');showFreundProcesses(_selectedFriendIdx)"
         style="padding:16px 12px;background:var(--bg3);border:1px solid #fb923c;border-radius:14px;color:#fdba74;font-size:14px;cursor:pointer;display:flex;flex-direction:column;align-items:center;gap:6px;">
         <span style="font-size:22px;">📋</span>Prozesse
       </button>
-      <button onclick="challengeFriendPong();closeOverlay('freundeOverlay')"
+      <button onclick="closeOverlay('freundeOverlay');challengeFriendPong(_selectedFriendIdx)"
         style="padding:16px 12px;background:var(--bg3);border:1px solid #22c55e;border-radius:14px;color:#4ade80;font-size:14px;cursor:pointer;display:flex;flex-direction:column;align-items:center;gap:6px;grid-column:span 2;">
         <span style="font-size:22px;">🏓</span>Pong herausfordern
       </button>
+      <button onclick="closeOverlay('freundeOverlay');showFriendDraw(_selectedFriendIdx,_selectedFriendName)"
+        style="padding:16px 12px;background:var(--bg3);border:1px solid #f472b6;border-radius:14px;color:#f472b6;font-size:14px;cursor:pointer;display:flex;flex-direction:column;align-items:center;gap:6px;grid-column:span 2;">
+        <span style="font-size:22px;">✏️</span>Auf Bildschirm zeichnen
+      </button>
     </div>
     <button class="btn-primary" onclick="closeOverlay('freundeOverlay')" style="margin-top:14px;background:var(--bg3);">Schließen</button>
+  </div>
+</div>
+
+<!-- FREUND DRAW OVERLAY -->
+<div class="overlay" id="friendDrawOverlay" onclick="closeFriendDraw()">
+  <div class="sheet" onclick="event.stopPropagation()" style="max-height:90dvh;">
+    <div class="sheet-handle"></div>
+    <h2>✏️ Auf Bildschirm zeichnen</h2>
+    <div id="friendDrawMonitorPicker" style="display:flex;gap:6px;flex-wrap:wrap;margin-bottom:12px;"></div>
+    <div style="display:flex;gap:8px;align-items:center;margin-bottom:12px;">
+      <input type="color" id="friendDrawColor" value="#ff3333" style="width:36px;height:36px;border:none;border-radius:8px;cursor:pointer;background:none;">
+      <input type="range" id="friendDrawWidth" min="2" max="20" value="5" style="flex:1;">
+      <button onclick="sendFriendDraw('clear',{})"
+        style="padding:6px 12px;background:none;border:1px solid #475569;border-radius:8px;color:#94a3b8;cursor:pointer;">🗑</button>
+    </div>
+    <canvas id="friendDrawCanvas"
+      style="width:100%;aspect-ratio:16/9;background:#111;border-radius:12px;cursor:crosshair;touch-action:none;"></canvas>
+    <p style="color:var(--text2);font-size:12px;margin-top:8px;text-align:center;">Zeichne hier — erscheint auf dem Bildschirm des Freundes</p>
+    <button class="btn-primary" onclick="closeFriendDraw()" style="margin-top:10px;background:#f472b6;">Beenden</button>
   </div>
 </div>
 
@@ -1777,6 +1800,7 @@ async function loadMonitorPicker() {
 }
 
 async function selectMonitor(idx) {
+  _currentMonitorIdx = idx;
   await fetch('/api/screen/monitor', {method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({idx})});
   document.getElementById('screenImg').src = '/api/screen?' + Date.now();
   await loadMonitorPicker();
@@ -1867,7 +1891,9 @@ function renderFriendsList() {
       <button onclick="triggerFriendJumpscare(${f.idx},'${f.name}')" id="friendScareBtn_${f.idx}"
         style="padding:8px 12px;background:var(--bg3);border:1px solid #f59e0b;border-radius:10px;color:#fbbf24;font-size:13px;cursor:pointer;opacity:.4;" disabled>👻</button>
       <button onclick="closeOverlay('friendsOverlay');showFriendScreen(${f.idx},'${f.name}')" id="friendScreenBtn_${f.idx}"
-        style="padding:8px 12px;background:var(--bg3);border:1px solid #0ea5e9;border-radius:10px;color:#38bdf8;font-size:13px;cursor:pointer;opacity:.4;" disabled>🖥️</button>`;
+        style="padding:8px 12px;background:var(--bg3);border:1px solid #0ea5e9;border-radius:10px;color:#38bdf8;font-size:13px;cursor:pointer;opacity:.4;" disabled>🖥️</button>
+      <button onclick="selectFriendActions(${f.idx},'${f.name}')" id="friendMoreBtn_${f.idx}"
+        style="padding:8px 12px;background:var(--bg3);border:1px solid var(--border);border-radius:10px;color:var(--text2);font-size:13px;cursor:pointer;">⋯</button>`;
     list.appendChild(row);
     fetchFriendInfo(f.idx);
   });
@@ -2015,6 +2041,19 @@ function closeFriendScreen() {
 }
 
 // ── SETTINGS ─────────────────────────────────────────────────────
+async function toggleAdminAccess() {
+  try {
+    const r = await fetch('/api/admin/toggle', {method:'POST'});
+    const d = await r.json();
+    const btn = document.getElementById('adminToggleBtn');
+    if (btn) {
+      btn.textContent = d.enabled ? '🔓 Admin-Zugriff: AN' : '🔒 Admin-Zugriff: AUS';
+      btn.style.borderColor = d.enabled ? '#4ade80' : '';
+      btn.style.color = d.enabled ? '#4ade80' : '';
+    }
+  } catch(e) {}
+}
+
 async function showSettings() {
   try {
     const r = await fetch('/api/settings');
@@ -2051,11 +2090,114 @@ async function saveSettings() {
   } catch(e) {
     msg.style.color = '#fca5a5'; msg.textContent = 'Verbindungsfehler';
   }
+}
 // ── FREUNDE OVERLAY ──────────────────────────────────────────────
+let _selectedFriendIdx = 0;
+let _selectedFriendName = '';
+
 function showFreunde() {
+  renderFriendsList();
+  document.getElementById('friendsOverlay').classList.add('show');
+}
+
+let _friendDrawActive = false;
+let _friendDrawIdx = 0;
+
+async function showFriendDraw(idx, name) {
+  _friendDrawIdx = idx;
+  _friendDrawActive = true;
+  // Lade Monitore des Freundes
+  try {
+    const r = await fetch(`/api/friend/${idx}/draw/monitors`);
+    const d = await r.json();
+    const picker = document.getElementById('friendDrawMonitorPicker');
+    if (picker && d.monitors) {
+      picker.innerHTML = d.monitors.map(m =>
+        `<button onclick="setFriendDrawMonitor(${m.idx})" id="fdmon_${m.idx}"
+          style="padding:6px 12px;border-radius:8px;border:1px solid var(--border);background:var(--bg3);color:var(--text2);cursor:pointer;font-size:13px;">${m.label}</button>`
+      ).join('');
+      if (d.monitors.length > 0) setFriendDrawMonitor(d.monitors[0].idx);
+    }
+  } catch(e) {}
+  document.getElementById('friendDrawOverlay').classList.add('show');
+}
+
+let _friendDrawMonitor = 1;
+function setFriendDrawMonitor(idx) {
+  _friendDrawMonitor = idx;
+  document.querySelectorAll('[id^="fdmon_"]').forEach(b => {
+    b.style.borderColor = b.id === `fdmon_${idx}` ? '#f472b6' : '';
+    b.style.color = b.id === `fdmon_${idx}` ? '#f472b6' : '';
+  });
+}
+
+async function sendFriendDraw(action, stroke) {
+  try {
+    await fetch(`/api/friend/${_friendDrawIdx}/draw`, {
+      method: 'POST', headers: {'Content-Type':'application/json'},
+      body: JSON.stringify({action, ...stroke, monitor: _friendDrawMonitor})
+    });
+  } catch(e) {}
+}
+
+function closeFriendDraw() {
+  _friendDrawActive = false;
+  sendFriendDraw('close', {});
+  closeOverlay('friendDrawOverlay');
+}
+
+(function _initFriendDrawCanvas() {
+  let _fDrawing = false, _fStroke = null;
+  function _setup() {
+    const canvas = document.getElementById('friendDrawCanvas');
+    if (!canvas) return;
+    canvas.width  = canvas.offsetWidth  || 640;
+    canvas.height = canvas.offsetHeight || 360;
+    const ctx = canvas.getContext('2d');
+    function getPos(e) {
+      const rect = canvas.getBoundingClientRect();
+      const t = e.touches ? e.touches[0] : e;
+      return { x: (t.clientX - rect.left) / rect.width, y: (t.clientY - rect.top) / rect.height };
+    }
+    function startDraw(e) {
+      e.preventDefault(); _fDrawing = true;
+      const p = getPos(e);
+      const color = document.getElementById('friendDrawColor').value;
+      const width = parseInt(document.getElementById('friendDrawWidth').value);
+      _fStroke = {pts: [[p.x, p.y]], color, width};
+      ctx.beginPath(); ctx.moveTo(p.x * canvas.width, p.y * canvas.height);
+      ctx.strokeStyle = color; ctx.lineWidth = width;
+      ctx.lineCap = 'round'; ctx.lineJoin = 'round';
+    }
+    function doDraw(e) {
+      e.preventDefault();
+      if (!_fDrawing || !_fStroke) return;
+      const p = getPos(e);
+      _fStroke.pts.push([p.x, p.y]);
+      ctx.lineTo(p.x * canvas.width, p.y * canvas.height); ctx.stroke();
+    }
+    function endDraw() {
+      if (!_fDrawing || !_fStroke) return;
+      _fDrawing = false;
+      if (_fStroke.pts.length > 1) sendFriendDraw('add', _fStroke);
+      _fStroke = null;
+    }
+    canvas.onmousedown  = startDraw; canvas.onmousemove  = doDraw; canvas.onmouseup   = endDraw;
+    canvas.ontouchstart = startDraw; canvas.ontouchmove  = doDraw; canvas.ontouchend  = endDraw;
+  }
+  document.getElementById('friendDrawOverlay')?.addEventListener('transitionend', _setup);
+})();
+
+function selectFriendActions(idx, name) {
+  _selectedFriendIdx = idx;
+  _selectedFriendName = name;
+  document.getElementById('freundeOverlayTitle').textContent = '👥 ' + name;
+  closeOverlay('friendsOverlay');
   document.getElementById('freundeOverlay').classList.add('show');
 }
-function showFreundNotify() {
+
+function showFreundNotify(idx) {
+  _selectedFriendIdx = (idx !== undefined) ? idx : _selectedFriendIdx;
   document.getElementById('freundNotifyOverlay').classList.add('show');
 }
 async function sendFreundNotification() {
@@ -2063,7 +2205,7 @@ async function sendFreundNotification() {
   const msg   = document.getElementById('freundNotifyMsg').value.trim();
   if (!msg) return;
   try {
-    const r = await fetch('/api/friend/notify', {
+    const r = await fetch(`/api/friend/${_selectedFriendIdx}/notify`, {
       method:'POST', headers:{'Content-Type':'application/json'},
       body: JSON.stringify({title, message: msg})
     });
@@ -2072,14 +2214,15 @@ async function sendFreundNotification() {
   } catch(e) { addMsg('Freund nicht erreichbar 😢', 'sys'); }
   closeOverlay('freundNotifyOverlay');
 }
-async function showFreundProcesses() {
+async function showFreundProcesses(idx) {
+  _selectedFriendIdx = (idx !== undefined) ? idx : _selectedFriendIdx;
   document.getElementById('freundProcessesOverlay').classList.add('show');
   await loadFreundProcesses();
 }
 async function loadFreundProcesses() {
   document.getElementById('freundProcList').innerHTML = '<div class="notes-empty">Lade...</div>';
   try {
-    const r = await fetch('/api/friend/processes');
+    const r = await fetch(`/api/friend/${_selectedFriendIdx}/processes`);
     const d = await r.json();
     if (d.error) { document.getElementById('freundProcList').innerHTML = `<div class="notes-empty">⛔ ${escHtml(d.error)}</div>`; return; }
     const procs = d.processes || [];
@@ -2096,7 +2239,7 @@ async function loadFreundProcesses() {
 async function killFreundProcess(pid, btn) {
   btn.disabled = true; btn.textContent = '...';
   try {
-    const r = await fetch('/api/friend/processes/' + pid + '/kill', {method:'POST'});
+    const r = await fetch(`/api/friend/${_selectedFriendIdx}/processes/${pid}/kill`, {method:'POST'});
     const d = await r.json();
     if (d.ok) { document.getElementById('fprc-' + pid)?.remove(); }
     else { btn.textContent = '⛔'; setTimeout(() => { btn.textContent = 'Kill'; btn.disabled = false; }, 2000); }
@@ -2106,8 +2249,6 @@ async function killFreundProcess(pid, btn) {
 // ── SPIELE OVERLAY ───────────────────────────────────────────────
 function showSpiele() {
   document.getElementById('spieleOverlay').classList.add('show');
-}
-
 }
 
 // ── SPOTIFY ─────────────────────────────────────────────────────
@@ -2596,6 +2737,7 @@ async function _sendRemoteRaw(type, data) {
 
 // ── DRAW OVERLAY ─────────────────────────────────────────────────
 let _drawMode = false, _drawing = false, _curStroke = null;
+let _currentMonitorIdx = 1;
 
 function toggleDraw() {
   _drawMode = !_drawMode;
@@ -2656,7 +2798,7 @@ function _setupDrawCanvas(canvas) {
     if (_curStroke.pts.length > 1) {
       fetch('/api/draw', {
         method: 'POST', headers: {'Content-Type':'application/json'},
-        body: JSON.stringify({action:'add', ..._curStroke})
+        body: JSON.stringify({action:'add', ..._curStroke, monitor: _currentMonitorIdx})
       }).catch(()=>{});
     }
     _curStroke = null;
@@ -2671,6 +2813,21 @@ async function clearDraw() {
     method:'POST', headers:{'Content-Type':'application/json'},
     body: JSON.stringify({action:'clear'})
   }).catch(()=>{});
+}
+
+async function challengeFriendPong(idx) {
+  _selectedFriendIdx = (idx !== undefined) ? idx : _selectedFriendIdx;
+  try {
+    const r = await fetch(`/api/friend/${_selectedFriendIdx}/pong/challenge`, {method:'POST'});
+    const d = await r.json();
+    if (d.ok) {
+      showPong(true);
+    } else {
+      addMsg('⛔ ' + (d.error || 'Pong-Herausforderung fehlgeschlagen.'), 'sys');
+    }
+  } catch(e) {
+    addMsg('Freund nicht erreichbar 😢', 'sys');
+  }
 }
 
 // ── PONG GAME ────────────────────────────────────────────────────
@@ -2712,7 +2869,7 @@ function _startPongInput() {
   canvas.ontouchmove  = e => { e.preventDefault(); updateY(e); };
   canvas.ontouchstart = e => { e.preventDefault(); updateY(e); };
   const side = _pongFriendMode ? 'right' : 'left';
-  const url  = _pongFriendMode ? '/api/friend/pong/paddle' : '/api/pong/paddle';
+  const url  = _pongFriendMode ? `/api/friend/${_selectedFriendIdx}/pong/paddle` : '/api/pong/paddle';
   _pongPoll = setInterval(async () => {
     if (!_pongActive) return;
     fetch(url, {
@@ -2726,7 +2883,7 @@ function _startPongRender() {
   const ctx    = canvas.getContext('2d');
   const W = canvas.width, H = canvas.height;
   let state = null, frame = 0;
-  const stateUrl = _pongFriendMode ? '/api/friend/pong/state' : '/api/pong/state';
+  const stateUrl = _pongFriendMode ? `/api/friend/${_selectedFriendIdx}/pong/state` : '/api/pong/state';
 
   async function fetchState() {
     try { state = await (await fetch(stateUrl)).json(); } catch(e) {}
@@ -3197,6 +3354,18 @@ def send_notification():
     except Exception as e:
         return jsonify(ok=False, error=str(e))
 
+@app.route('/api/friend/<int:idx>/notify', methods=['POST'])
+@login_required
+def friend_notify_idx(idx):
+    if idx >= len(FRIENDS):
+        return jsonify(ok=False, error="Unbekannter Freund.")
+    url = FRIENDS[idx]['url']
+    try:
+        r = req.post(f"{url}/api/admin/notify", json=request.json or {}, timeout=5)
+        return jsonify(r.json())
+    except Exception as e:
+        return jsonify(ok=False, error=str(e))
+
 @app.route('/api/friend/notify', methods=['POST'])
 @login_required
 def friend_notify():
@@ -3287,16 +3456,23 @@ _draw_strokes = []
 _draw_lock    = threading.Lock()
 _draw_active  = False
 
-def _draw_overlay_thread():
+def _draw_overlay_thread(monitor=None):
     global _draw_active
     try:
         import tkinter as tk
         _draw_active = True
         root = tk.Tk()
         root.overrideredirect(True)
-        sw = root.winfo_screenwidth()
-        sh = root.winfo_screenheight()
-        root.geometry(f"{sw}x{sh}+0+0")
+        if monitor:
+            sw = monitor['w']
+            sh = monitor['h']
+            mx = monitor['x']
+            my = monitor['y']
+        else:
+            sw = root.winfo_screenwidth()
+            sh = root.winfo_screenheight()
+            mx, my = 0, 0
+        root.geometry(f"{sw}x{sh}+{mx}+{my}")
         root.attributes('-topmost', True)
         root.configure(bg='black')
         root.attributes('-transparentcolor', 'black')
@@ -3357,9 +3533,33 @@ def draw_overlay():
         with _draw_lock:
             _draw_strokes.append(seg)
         if not _draw_active:
-            threading.Thread(target=_draw_overlay_thread, daemon=True).start()
+            mon_idx = data.get('monitor', 1)
+            monitor = None
+            try:
+                import mss
+                with mss.mss() as sct:
+                    idx = int(mon_idx) if mon_idx else 1
+                    m = sct.monitors[idx] if idx < len(sct.monitors) else sct.monitors[1]
+                    monitor = {'x': m['left'], 'y': m['top'], 'w': m['width'], 'h': m['height']}
+            except Exception:
+                pass
+            threading.Thread(target=_draw_overlay_thread, args=(monitor,), daemon=True).start()
         return jsonify(ok=True)
     return jsonify(ok=False, error="Unbekannte Aktion.")
+
+@app.route('/api/draw/monitors', methods=['GET'])
+@login_required
+def draw_monitors():
+    """Gibt verfügbare Monitore zurück für die Zeichenfunktion."""
+    try:
+        import mss
+        with mss.mss() as sct:
+            monitors = []
+            for i, m in enumerate(sct.monitors[1:], 1):  # skip [0] which is "all"
+                monitors.append({'idx': i, 'label': f'Monitor {i}', 'x': m['left'], 'y': m['top'], 'w': m['width'], 'h': m['height']})
+        return jsonify(monitors=monitors, active=1)
+    except Exception as e:
+        return jsonify(monitors=[{'idx': 1, 'label': 'Monitor 1', 'x': 0, 'y': 0, 'w': 1920, 'h': 1080}], active=1)
 
 # ── PONG GAME ─────────────────────────────────────────────────────
 import random as _random
@@ -3500,6 +3700,18 @@ def pong_challenge():
         pass
     return jsonify(ok=True)
 
+@app.route('/api/friend/<int:idx>/pong/state')
+@login_required
+def friend_pong_state_idx(idx):
+    if idx >= len(FRIENDS):
+        return jsonify(running=False, error="Unbekannter Freund.")
+    url = FRIENDS[idx]['url']
+    try:
+        r = req.get(f"{url}/api/admin/pong/state", timeout=3)
+        return jsonify(**r.json())
+    except Exception as e:
+        return jsonify(running=False, error=str(e))
+
 @app.route('/api/friend/pong/state')
 @login_required
 def friend_pong_state():
@@ -3511,6 +3723,18 @@ def friend_pong_state():
     except Exception as e:
         return jsonify(running=False, error=str(e))
 
+@app.route('/api/friend/<int:idx>/pong/paddle', methods=['POST'])
+@login_required
+def friend_pong_paddle_idx(idx):
+    if idx >= len(FRIENDS):
+        return jsonify(ok=False, error="Unbekannter Freund.")
+    url = FRIENDS[idx]['url']
+    try:
+        r = req.post(f"{url}/api/admin/pong/paddle", json=request.json or {}, timeout=2)
+        return jsonify(**r.json())
+    except Exception as e:
+        return jsonify(ok=False, error=str(e))
+
 @app.route('/api/friend/pong/paddle', methods=['POST'])
 @login_required
 def friend_pong_paddle():
@@ -3519,6 +3743,18 @@ def friend_pong_paddle():
     try:
         r = req.post(f"{FRIEND_URL}/api/admin/pong/paddle", json=request.json or {}, timeout=2)
         return jsonify(**r.json())
+    except Exception as e:
+        return jsonify(ok=False, error=str(e))
+
+@app.route('/api/friend/<int:idx>/pong/challenge', methods=['POST'])
+@login_required
+def friend_pong_challenge_idx(idx):
+    if idx >= len(FRIENDS):
+        return jsonify(ok=False, error="Unbekannter Freund.")
+    url = FRIENDS[idx]['url']
+    try:
+        r = req.post(f"{url}/api/admin/pong/challenge", timeout=5)
+        return jsonify(r.json())
     except Exception as e:
         return jsonify(ok=False, error=str(e))
 
@@ -3533,6 +3769,42 @@ def friend_pong_challenge():
     except Exception as e:
         return jsonify(ok=False, error=str(e))
 
+@app.route('/api/friend/<int:idx>/draw', methods=['POST'])
+@login_required
+def friend_draw_idx(idx):
+    if idx >= len(FRIENDS):
+        return jsonify(ok=False, error="Unbekannter Freund.")
+    url = FRIENDS[idx]['url']
+    try:
+        r = req.post(f"{url}/api/admin/draw", json=request.json or {}, timeout=5)
+        return jsonify(r.json())
+    except Exception as e:
+        return jsonify(ok=False, error=str(e))
+
+@app.route('/api/friend/<int:idx>/draw/monitors', methods=['GET'])
+@login_required
+def friend_draw_monitors_idx(idx):
+    if idx >= len(FRIENDS):
+        return jsonify(monitors=[])
+    url = FRIENDS[idx]['url']
+    try:
+        r = req.get(f"{url}/api/admin/draw/monitors", timeout=5)
+        return jsonify(r.json())
+    except Exception as e:
+        return jsonify(monitors=[{'idx': 1, 'label': 'Monitor 1', 'x': 0, 'y': 0, 'w': 1920, 'h': 1080}])
+
+@app.route('/api/friend/<int:idx>/processes')
+@login_required
+def friend_processes_idx(idx):
+    if idx >= len(FRIENDS):
+        return jsonify(error="Unbekannter Freund.")
+    url = FRIENDS[idx]['url']
+    try:
+        r = req.get(f"{url}/api/admin/processes", timeout=5)
+        return jsonify(**r.json())
+    except Exception as e:
+        return jsonify(error=str(e))
+
 @app.route('/api/friend/processes')
 @login_required
 def friend_processes():
@@ -3543,6 +3815,18 @@ def friend_processes():
         return jsonify(**r.json())
     except Exception as e:
         return jsonify(error=str(e))
+
+@app.route('/api/friend/<int:idx>/processes/<int:pid>/kill', methods=['POST'])
+@login_required
+def friend_kill_process_idx(idx, pid):
+    if idx >= len(FRIENDS):
+        return jsonify(ok=False, error="Unbekannter Freund.")
+    url = FRIENDS[idx]['url']
+    try:
+        r = req.post(f"{url}/api/admin/processes/{pid}/kill", timeout=5)
+        return jsonify(**r.json())
+    except Exception as e:
+        return jsonify(ok=False, error=str(e))
 
 @app.route('/api/friend/processes/<int:pid>/kill', methods=['POST'])
 @login_required

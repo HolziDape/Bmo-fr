@@ -50,14 +50,17 @@ def _kill(proc):
     except Exception:
         pass
 
+CORE_STDERR_LOG = os.path.join(BASE_DIR, "_intern", "logs", "bmo_core_stderr.log")
+
 def start_core():
     global core_proc
     _kill(core_proc)   # alte Instanz explizit beenden → kein Port-Konflikt
     log.info("Starte bmo_core.py ...")
+    stderr_f = open(CORE_STDERR_LOG, "a", encoding="utf-8")
     core_proc = subprocess.Popen(
         [PYTHON, CORE],
         stdout=subprocess.DEVNULL,
-        stderr=subprocess.DEVNULL,
+        stderr=stderr_f,
         creationflags=subprocess.CREATE_NO_WINDOW,
     )
     log.info(f"Core PID: {core_proc.pid}")

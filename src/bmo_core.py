@@ -24,7 +24,7 @@ import os
 import logging
 
 # AppData-Pakete (tts_with_rvc etc.) explizit einbinden
-sys.path.insert(0, r"C:\Users\damja\AppData\Roaming\Python\Python310\site-packages")
+sys.path.insert(0, r"D:\python\Thonny\Lib\site-packages")
 
 # ── LOGGING ────────────────────────────────────────────────────────────────
 LOG_PATH = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "_intern", "logs", "bmo_core.log")

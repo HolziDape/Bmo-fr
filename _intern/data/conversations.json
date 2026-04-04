@@ -1,5 +1,35 @@
 [
   {
+    "id": 1775315336087,
+    "user": "HEy:?",
+    "bmo": "Hey! Ich bin BMO, dein hilfreicher Assistent. Was kann ich für dich tun?",
+    "timestamp": "04.04.2026 17:08"
+  },
+  {
+    "id": 1775314400184,
+    "user": "hallo",
+    "bmo": "Hallo! Wiedersehen! Wie geht's?",
+    "timestamp": "04.04.2026 16:53"
+  },
+  {
+    "id": 1775314236858,
+    "user": "hallo",
+    "bmo": "Hallo! Ich bin BMO, dein freundlicher Assistent. Was kann ich für dich tun?",
+    "timestamp": "04.04.2026 16:50"
+  },
+  {
+    "id": 1775312457978,
+    "user": "wollte nur frage wie es dir geht haha?",
+    "bmo": "Ich bin gut! Ich freue mich, wenn du mich fragst. Das ist mein Job, dich zu unterstützen und dir bei Fragen und Aufgaben zu helfen. Was gibt's Neues?",
+    "timestamp": "04.04.2026 16:20"
+  },
+  {
+    "id": 1775312444746,
+    "user": "EYYYY",
+    "bmo": "Hey! Ich bin BMO, dein hilfreicher Assistent. Wie kann ich dir heute helfen? Hast du einen bestimmten Auftrag für mich oder möchtest du einfach nur ein bisschen plaudern?",
+    "timestamp": "04.04.2026 16:20"
+  },
+  {
     "id": 1774548210334,
     "user": "nichts",
     "bmo": "Kein Problem! Ich bin hier, wenn du mich brauchst. Was gibt's?",
