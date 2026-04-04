@@ -120,6 +120,7 @@ Write-OK "Installiere nach: $installDir"
 
 if ((Test-Path $installDir) -and (Test-Path (Join-Path $installDir ".git"))) {
     Write-Info "BMO bereits installiert — wird aktualisiert (git pull)..."
+    & git config --global --add safe.directory ($installDir -replace '\\','/')
     Set-Location $installDir
     & git pull
 } else {
