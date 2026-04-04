@@ -6,15 +6,39 @@ Inspiriert von BMO aus Adventure Time. Läuft lokal auf Windows — kein Cloud-Z
 
 ---
 
-## ⚡ Schnell-Installation (empfohlen)
+## ⚡ Schnell-Installation
 
-**PowerShell** öffnen (`Win + X` → „Windows PowerShell") und diesen Befehl einfügen:
+**Wer bist du?**
+
+<details>
+<summary><b>🧠 Ich bin der Admin</b> — ich betreibe BMO auf meinem PC</summary>
+
+<br>
+
+**PowerShell** öffnen (`Win + X` → „Windows PowerShell") und einfügen:
 
 ```powershell
 powershell -ExecutionPolicy Bypass -c "irm https://raw.githubusercontent.com/HolziDape/Bmo/main/install.ps1 | iex"
 ```
 
-> Das Skript installiert automatisch: Python, Git, Ollama, alle Pakete und das KI-Modell — dann öffnet sich der BMO-Ordner.
+> Installiert automatisch: Python · Git · Ollama · alle Pakete · KI-Modell — dann öffnet sich der BMO-Ordner.
+
+</details>
+
+<details>
+<summary><b>👾 Ich bin der Freund</b> — mein Freund betreibt BMO, ich will nur den Client</summary>
+
+<br>
+
+**PowerShell** öffnen (`Win + X` → „Windows PowerShell") und einfügen:
+
+```powershell
+powershell -ExecutionPolicy Bypass -c "irm https://raw.githubusercontent.com/HolziDape/Bmo_f/main/install.ps1 | iex"
+```
+
+> Installiert automatisch: Python · Git · alle Pakete — dann öffnet sich der BMO-Freund-Ordner.
+
+</details>
 
 ---
 
@@ -35,15 +59,6 @@ powershell -ExecutionPolicy Bypass -c "irm https://raw.githubusercontent.com/Hol
 
 ---
 
-## 👤 Wer bist du?
-
-> **[→ Ich bin der Admin (Hauptnutzer)](#-installation--admin)**
-> Ich betreibe BMO auf meinem PC. Ich will Core, Web-Interface und/oder Desktop-GUI.
-
-> **[→ Ich bin der Freund](#-installation--freund)**
-> Mein Freund betreibt BMO. Ich will nur den Freundes-Client installieren.
-
----
 
 ## 📂 Projektstruktur
 
