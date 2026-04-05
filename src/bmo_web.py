@@ -2860,9 +2860,9 @@ function closePong() {
   if (_pongPoll) clearInterval(_pongPoll);
   document.getElementById('pongOverlay').classList.remove('show');
 }
-function acceptPongChallenge() {
+async function acceptPongChallenge() {
   document.getElementById('pongChallengeBanner').style.display = 'none';
-  // Spiel läuft bereits (Freund hat es gestartet) — nur Overlay öffnen
+  await fetch('/api/pong/accept', {method:'POST'}).catch(()=>{});
   _pongFriendMode = false;
   _pongActive = true;
   document.getElementById('pongOverlay').classList.add('show');
@@ -3792,6 +3792,15 @@ def pong_pending():
         _pong_pending = False
     return jsonify(pending=p)
 
+@app.route('/api/pong/accept', methods=['POST'])
+@login_required
+def pong_accept():
+    """Admin nimmt Pong-Challenge an — Countdown starten."""
+    with _pong_lock:
+        _pong['friend_ready'] = True
+        _pong['countdown_until'] = _time.time() + 3
+    return jsonify(ok=True)
+
 @app.route('/api/friend/<int:idx>/pong/state')
 @login_required
 def friend_pong_state_idx(idx):
@@ -3988,8 +3997,8 @@ def admin_pong_challenge():
     global _pong_pending
     with _pong_lock:
         _pong['right_human'] = True
-        _pong['friend_ready'] = True   # Freund ist schon da (er hat challengt)
-        _pong['countdown_until'] = _time.time() + 3
+        _pong['friend_ready'] = False  # Warte bis Admin annimmt
+        _pong['countdown_until'] = 0.0
         _pong['score_l'] = 0; _pong['score_r'] = 0
         b = _pong['ball']
         _reset_ball(b, 1 if _random.random() > 0.5 else -1)
