@@ -3901,6 +3901,12 @@ def _admin_check():
 def admin_pong_state():
     return jsonify(**_pong_state_dict())
 
+@app.route('/api/admin/pong/join', methods=['POST'])
+def admin_pong_join():
+    with _pong_lock:
+        _pong['right_human'] = True
+    return jsonify(ok=True)
+
 @app.route('/api/admin/pong/paddle', methods=['POST'])
 def admin_pong_paddle():
     data = request.json or {}
