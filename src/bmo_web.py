@@ -3901,6 +3901,20 @@ def _admin_check():
 def admin_pong_state():
     return jsonify(**_pong_state_dict())
 
+@app.route('/api/admin/pong/stream')
+def admin_pong_stream():
+    """SSE-Stream: pusht Pong-State ~60fps direkt zum Browser."""
+    import json as _json
+    def generate():
+        while True:
+            s = _pong_state_dict()
+            yield f"data: {_json.dumps(s)}\n\n"
+            _time.sleep(0.016)
+    resp = Response(generate(), mimetype='text/event-stream')
+    resp.headers['Cache-Control'] = 'no-cache'
+    resp.headers['X-Accel-Buffering'] = 'no'
+    return resp
+
 @app.route('/api/admin/pong/join', methods=['POST'])
 def admin_pong_join():
     with _pong_lock:
