@@ -2937,13 +2937,31 @@ function _startPongRender() {
         ctx.fillStyle = '#475569'; ctx.font = '11px monospace';
         ctx.fillText('🤖', W - 28, 18);
       }
-      // Ball glow
-      const bx = state.ball.x * W, by = state.ball.y * H;
-      const grd = ctx.createRadialGradient(bx, by, 0, bx, by, 14);
-      grd.addColorStop(0, 'rgba(255,255,255,.9)');
-      grd.addColorStop(1, 'rgba(255,255,255,0)');
-      ctx.fillStyle = grd; ctx.beginPath(); ctx.arc(bx, by, 14, 0, Math.PI*2); ctx.fill();
-      ctx.fillStyle = '#fff'; ctx.beginPath(); ctx.arc(bx, by, 6, 0, Math.PI*2); ctx.fill();
+      // Ball glow (nur wenn Spiel läuft)
+      if (!state.right_human || state.friend_ready) {
+        const bx = state.ball.x * W, by = state.ball.y * H;
+        const grd = ctx.createRadialGradient(bx, by, 0, bx, by, 14);
+        grd.addColorStop(0, 'rgba(255,255,255,.9)');
+        grd.addColorStop(1, 'rgba(255,255,255,0)');
+        ctx.fillStyle = grd; ctx.beginPath(); ctx.arc(bx, by, 14, 0, Math.PI*2); ctx.fill();
+        ctx.fillStyle = '#fff'; ctx.beginPath(); ctx.arc(bx, by, 6, 0, Math.PI*2); ctx.fill();
+      }
+      // Warte auf Freund
+      if (state.right_human && !state.friend_ready) {
+        ctx.fillStyle = 'rgba(0,0,0,0.55)'; ctx.fillRect(0, 0, W, H);
+        ctx.fillStyle = '#94a3b8'; ctx.font = 'bold 22px monospace';
+        ctx.textAlign = 'center';
+        ctx.fillText('Warte auf Freund...', W/2, H/2);
+        ctx.textAlign = 'left';
+      }
+      // Countdown
+      if (state.countdown > 0) {
+        ctx.fillStyle = 'rgba(0,0,0,0.45)'; ctx.fillRect(0, 0, W, H);
+        ctx.fillStyle = '#4ade80'; ctx.font = 'bold 96px monospace';
+        ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
+        ctx.fillText(state.countdown, W/2, H/2);
+        ctx.textAlign = 'left'; ctx.textBaseline = 'alphabetic';
+      }
     }
     _pongRAF = requestAnimationFrame(loop);
   }
@@ -3597,6 +3615,8 @@ _pong = {
     'score_l':     0,   'score_r':    0,
     'running':     False,
     'right_human': False,  # True wenn Freund rechts spielt
+    'friend_ready':    False,   # True sobald Freund beigetreten ist
+    'countdown_until': 0.0,    # time.time() + 3 wenn Countdown läuft
 }
 
 def _reset_ball(b, direction):
@@ -3657,17 +3677,34 @@ def _pong_step():
 
 def _pong_loop():
     while _pong['running']:
+        with _pong_lock:
+            rh = _pong['right_human']
+            fr = _pong['friend_ready']
+            cu = _pong['countdown_until']
+        if rh and not fr:
+            # Warte auf Freund
+            _time.sleep(0.1)
+            continue
+        if _time.time() < cu:
+            # Countdown läuft — Ball einfrieren
+            _time.sleep(0.016)
+            continue
         _pong_step()
         _time.sleep(0.016)  # ~62 fps
 
 def _pong_state_dict():
+    import math as _math
     with _pong_lock:
+        cu = _pong['countdown_until']
+        cd = max(0, _math.ceil(cu - _time.time())) if cu > 0 else 0
         return dict(
             ball=dict(_pong['ball']),
             left=_pong['left'], right=_pong['right'],
             score_l=_pong['score_l'], score_r=_pong['score_r'],
             running=_pong['running'],
             right_human=_pong['right_human'],
+            friend_ready=_pong['friend_ready'],
+            countdown=cd,
         )
 
 @app.route('/api/pong/start', methods=['POST'])
@@ -3678,6 +3715,8 @@ def pong_start():
     with _pong_lock:
         _pong['score_l'] = 0; _pong['score_r'] = 0
         _pong['right_human'] = right_human
+        _pong['friend_ready'] = not right_human  # bei AI sofort ready
+        _pong['countdown_until'] = _time.time() + 3 if not right_human else 0.0
         b = _pong['ball']
         _reset_ball(b, 1 if _random.random() > 0.5 else -1)
         if not _pong['running']:
@@ -3720,6 +3759,8 @@ def pong_challenge():
     global _pong_pending
     with _pong_lock:
         _pong['right_human'] = True
+        _pong['friend_ready'] = False
+        _pong['countdown_until'] = 0.0
         if not _pong['running']:
             _pong['running'] = True
             threading.Thread(target=_pong_loop, daemon=True).start()
@@ -3919,6 +3960,8 @@ def admin_pong_stream():
 def admin_pong_join():
     with _pong_lock:
         _pong['right_human'] = True
+        _pong['friend_ready'] = True
+        _pong['countdown_until'] = _time.time() + 3
     return jsonify(ok=True)
 
 @app.route('/api/admin/pong/paddle', methods=['POST'])
@@ -3936,6 +3979,8 @@ def admin_pong_challenge():
     global _pong_pending
     with _pong_lock:
         _pong['right_human'] = True
+        _pong['friend_ready'] = False
+        _pong['countdown_until'] = 0.0
         if not _pong['running']:
             _pong['running'] = True
             threading.Thread(target=_pong_loop, daemon=True).start()
