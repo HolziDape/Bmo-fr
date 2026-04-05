@@ -2862,7 +2862,13 @@ function closePong() {
 }
 function acceptPongChallenge() {
   document.getElementById('pongChallengeBanner').style.display = 'none';
-  showPong(false);
+  // Spiel läuft bereits (Freund hat es gestartet) — nur Overlay öffnen
+  _pongFriendMode = false;
+  _pongActive = true;
+  document.getElementById('pongOverlay').classList.add('show');
+  document.getElementById('pongInfo').textContent = '🟢 Du = linkes Paddle (Maus/Touch)';
+  _startPongInput();
+  _startPongRender();
 }
 
 // Polling: prüfen ob Freund uns herausfordert
@@ -3759,8 +3765,11 @@ def pong_challenge():
     global _pong_pending
     with _pong_lock:
         _pong['right_human'] = True
-        _pong['friend_ready'] = False
-        _pong['countdown_until'] = 0.0
+        _pong['friend_ready'] = True   # Freund ist schon da
+        _pong['countdown_until'] = _time.time() + 3
+        _pong['score_l'] = 0; _pong['score_r'] = 0
+        b = _pong['ball']
+        _reset_ball(b, 1 if _random.random() > 0.5 else -1)
         if not _pong['running']:
             _pong['running'] = True
             threading.Thread(target=_pong_loop, daemon=True).start()
@@ -3979,8 +3988,11 @@ def admin_pong_challenge():
     global _pong_pending
     with _pong_lock:
         _pong['right_human'] = True
-        _pong['friend_ready'] = False
-        _pong['countdown_until'] = 0.0
+        _pong['friend_ready'] = True   # Freund ist schon da (er hat challengt)
+        _pong['countdown_until'] = _time.time() + 3
+        _pong['score_l'] = 0; _pong['score_r'] = 0
+        b = _pong['ball']
+        _reset_ball(b, 1 if _random.random() > 0.5 else -1)
         if not _pong['running']:
             _pong['running'] = True
             threading.Thread(target=_pong_loop, daemon=True).start()
