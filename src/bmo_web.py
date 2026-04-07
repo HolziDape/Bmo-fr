@@ -1203,6 +1203,9 @@ HTML = """<!DOCTYPE html>
     <button class="qbtn" onclick="showSettings()" style="border-color:#475569;color:#94a3b8;">
       <span class="icon">⚙️</span>Settings
     </button>
+    <button class="qbtn" id="liteModeBtn" onclick="toggleLiteMode()" style="border-color:#475569;color:#94a3b8;">
+      <span class="icon">⚡</span>Lite
+    </button>
   </div>
 
   <!-- TIMER BAR -->
@@ -3007,6 +3010,42 @@ function _roundRect(ctx, x, y, w, h, r, stroke=false) {
   stroke ? ctx.stroke() : ctx.fill();
 }
 
+// ── LITE-MODE ──────────────────────────────────────────────────────
+async function loadLiteMode() {
+  try {
+    const r = await fetch('/api/lite-mode');
+    if (!r.ok) return;
+    const d = await r.json();
+    updateLiteBtn(d.lite_mode);
+  } catch(e) {}
+}
+
+function updateLiteBtn(on) {
+  const btn = document.getElementById('liteModeBtn');
+  if (!btn) return;
+  btn.style.borderColor = on ? '#22c55e' : '#475569';
+  btn.style.color       = on ? '#4ade80' : '#94a3b8';
+  btn.style.background  = on ? 'rgba(34,197,94,0.08)' : '';
+}
+
+async function toggleLiteMode() {
+  try {
+    const r = await fetch('/api/lite-mode');
+    if (!r.ok) { alert('Core nicht erreichbar.'); return; }
+    const cur = (await r.json()).lite_mode;
+    const r2 = await fetch('/api/lite-mode/set', {
+      method: 'POST',
+      headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify({enable: !cur})
+    });
+    const d = await r2.json();
+    updateLiteBtn(d.lite_mode);
+    alert('Lite-Mode ' + (d.lite_mode ? 'aktiviert' : 'deaktiviert') + '. BMO Core neu starten damit Änderung greift.');
+  } catch(e) { alert('Fehler: Core erreichbar?'); }
+}
+
+loadLiteMode();
+
 // ── FRESH START ON LOAD ──────────────────────────────────────────
 fetch('/api/history/clear', {method: 'POST'}).catch(() => {});
 </script>
@@ -4184,6 +4223,27 @@ def admin_kill_process(pid):
         return jsonify(ok=False, error="Zugriff verweigert.")
     except Exception as e:
         return jsonify(ok=False, error=str(e))
+
+@app.route('/api/lite-mode', methods=['GET'])
+@login_required
+def api_lite_mode_get():
+    """Gibt aktuellen Lite-Mode Status vom Core zurück."""
+    try:
+        r = req.get(f"{CORE_URL}/lite-mode", timeout=3)
+        return jsonify(r.json())
+    except Exception:
+        return jsonify(lite_mode=False, error='Core nicht erreichbar')
+
+@app.route('/api/lite-mode/set', methods=['POST'])
+@login_required
+def api_lite_mode_set():
+    """Setzt Lite-Mode auf Core."""
+    data = request.get_json(silent=True) or {}
+    try:
+        r = req.post(f"{CORE_URL}/lite-mode", json=data, timeout=3)
+        return jsonify(r.json())
+    except Exception:
+        return jsonify(error='Core nicht erreichbar'), 503
 
 # ── START ──────────────────────────────────────────────────────────
 if __name__ == '__main__':
