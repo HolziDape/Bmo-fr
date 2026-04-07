@@ -1005,7 +1005,10 @@ def route_ping():
 def route_points_verify():
     """Empfängt und verifiziert Punkte-Stand vom Freund-Server."""
     data      = request.get_json(silent=True) or {}
-    points    = int(data.get('points', 0))
+    try:
+        points = int(data.get('points', 0))
+    except (ValueError, TypeError):
+        return jsonify(error='Ungültiger Punktestand'), 400
     freund_id = data.get('freund_id', 'unknown')
 
     stored = _load_points(freund_id)
@@ -1105,7 +1108,10 @@ def _run_draw_window():
         def close(_=None):
             global _draw_window_open
             _draw_window_open = False
-            root.destroy()
+            try:
+                root.destroy()
+            except Exception:
+                pass
 
         root.bind('<Button-1>', close)
         root.bind('<Escape>', close)
@@ -1132,7 +1138,10 @@ def _run_draw_window():
                 if s.get('type') == 'up':
                     last_x = last_y = None
             if not _draw_window_open:
-                root.destroy()
+                try:
+                    root.destroy()
+                except Exception:
+                    pass
                 return
             root.after(100, poll_strokes)
 
