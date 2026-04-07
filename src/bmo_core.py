@@ -41,7 +41,10 @@ log = logging.getLogger("BMO-Core")
 
 from flask import Flask, request, jsonify
 from flask_cors import CORS
-import ollama
+try:
+    import ollama as _ollama_lib
+except ImportError:
+    _ollama_lib = None
 import psutil
 import datetime
 import requests
@@ -107,6 +110,10 @@ def _ensure_points_secret() -> str:
     return cfg['POINTS_SECRET']
 
 _POINTS_SECRET_ADMIN = _ensure_points_secret()
+
+LITE_MODE = _read_bmo_config().get('LITE_MODE', 'false').lower() == 'true'
+if LITE_MODE:
+    log.info("LITE-MODE aktiv — Ollama, TTS und Wake-Word deaktiviert.")
 
 # ── DRAW STATE ──────────────────────────────────────────────────────────────
 _draw_strokes_for_friend: list = []   # Admin → Freund Striche
@@ -632,7 +639,7 @@ def process_text(text: str, remote: bool = False) -> tuple:
     messages.append({'role': 'user', 'content': text})
 
     try:
-        response = ollama.chat(model=OLLAMA_MODEL, messages=messages)
+        response = _ollama_lib.chat(model=OLLAMA_MODEL, messages=messages)
         content  = response['message']['content']
     except Exception as e:
         return f"Ollama ist gerade nicht erreichbar: {e}", None, {}
@@ -727,6 +734,8 @@ def save_conversation(user_text, bmo_text):
 @app.route('/process', methods=['POST'])
 def route_process():
     """Hauptendpunkt: Text rein → Antwort + action raus."""
+    if LITE_MODE or _ollama_lib is None:
+        return jsonify(response="KI nicht verfügbar im Lite-Mode."), 503
     data = request.json or {}
     text = (data.get('message') or data.get('text') or '').strip()
     remote = bool(data.get('remote', False))
@@ -740,6 +749,8 @@ def route_process():
 @app.route('/transcribe', methods=['POST'])
 def route_transcribe():
     """Audio (base64 webm/wav) → Transkript + Antwort + action."""
+    if LITE_MODE or _ollama_lib is None:
+        return jsonify(response="KI nicht verfügbar im Lite-Mode."), 503
     data = request.json or {}
     b64  = data.get('audio', '')
     fmt  = data.get('format', 'webm')
@@ -907,13 +918,15 @@ def route_spotify_volume():
 @app.route('/photo', methods=['POST'])
 def route_photo():
     """Bild (base64 JPEG) + optionale Frage → BMO beschreibt das Bild via Vision-Modell."""
+    if LITE_MODE or _ollama_lib is None:
+        return jsonify(response="KI nicht verfügbar im Lite-Mode."), 503
     data     = request.json or {}
     b64      = data.get('image', '')
     question = data.get('question', 'Was siehst du auf diesem Bild? Beschreibe es kurz auf Deutsch.')
     if not b64:
         return jsonify(response="Kein Bild empfangen.", action=None)
     try:
-        response = ollama.chat(
+        response = _ollama_lib.chat(
             model=VISION_MODEL,
             messages=[{
                 'role':    'user',
@@ -1052,6 +1065,24 @@ def route_draw_close():
     return jsonify(ok=True)
 
 
+@app.route('/lite-mode', methods=['GET'])
+def route_lite_mode_get():
+    return jsonify(lite_mode=LITE_MODE)
+
+@app.route('/lite-mode', methods=['POST'])
+def route_lite_mode_set():
+    """Schaltet Lite-Mode ein/aus (Neustart empfohlen)."""
+    global LITE_MODE
+    data   = request.get_json(silent=True) or {}
+    enable = data.get('enable', not LITE_MODE)
+    cfg    = _read_bmo_config()
+    cfg['LITE_MODE'] = 'true' if enable else 'false'
+    _write_bmo_config(cfg)
+    LITE_MODE = enable
+    log.info(f"Lite-Mode {'aktiviert' if enable else 'deaktiviert'}. Neustart empfohlen.")
+    return jsonify(lite_mode=enable, restart_required=True)
+
+
 # ── START ───────────────────────────────────────────────────────────────────
 def _run_draw_window():
     """Öffnet transparentes tkinter-Overlay auf dem Admin-Monitor (Freund malt drauf)."""
@@ -1116,7 +1147,10 @@ def _warmup_ollama():
     """Lädt das Ollama-Modell vorab in den RAM — erster Prompt wird schnell."""
     try:
         log.info(f"Ollama Warmup: Lade {OLLAMA_MODEL} vor...")
-        ollama.chat(model=OLLAMA_MODEL, messages=[{"role": "user", "content": "hi"}])
+        if _ollama_lib is None:
+            log.info("Ollama nicht verfügbar (Lite-Mode oder nicht installiert).")
+            return
+        _ollama_lib.chat(model=OLLAMA_MODEL, messages=[{"role": "user", "content": "hi"}])
         log.info("Ollama Warmup abgeschlossen — Modell bereit.")
     except Exception as e:
         log.warning(f"Ollama Warmup fehlgeschlagen (Ollama läuft?): {e}")
@@ -1124,7 +1158,8 @@ def _warmup_ollama():
 if __name__ == '__main__':
     log.info("BMO Core startet...")
     log.info(f"Port: {PORT} | Modell: {OLLAMA_MODEL} | Whisper: {WHISPER_MODEL_SIZE}")
-    threading.Thread(target=_warmup_ollama, daemon=True).start()
+    if not LITE_MODE:
+        threading.Thread(target=_warmup_ollama, daemon=True).start()
     try:
         from waitress import serve
         log.info("Nutze waitress als WSGI-Server (stabil, kein Keep-Alive-Problem)")
