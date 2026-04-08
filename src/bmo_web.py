@@ -1253,6 +1253,19 @@ HTML = """<!DOCTYPE html>
   </div>
 </div>
 
+<!-- LITE-REQUEST OVERLAY -->
+<div class="overlay" id="liteRequestOverlay">
+  <div class="sheet" onclick="event.stopPropagation()">
+    <div class="sheet-handle"></div>
+    <h2>&#9889; Lite-Mode ausschalten?</h2>
+    <p style="color:var(--text2);font-size:14px;margin-bottom:16px;">Der Freund m&#246;chte, dass du Lite-Mode ausschaltest.</p>
+    <div class="confirm-btns">
+      <button class="btn-cancel" onclick="answerLiteRequest(false)">Nein</button>
+      <button class="btn-confirm" onclick="answerLiteRequest(true)">Ja</button>
+    </div>
+  </div>
+</div>
+
 <!-- SHUTDOWN CONFIRM OVERLAY -->
 <div class="overlay" id="shutdownOverlay" onclick="closeOverlay('shutdownOverlay')">
   <div class="sheet" onclick="event.stopPropagation()">
@@ -3044,6 +3057,31 @@ async function toggleLiteMode() {
   } catch(e) { alert('Fehler: Core erreichbar?'); }
 }
 
+// ── LITE-REQUEST (Freund fragt ob Lite-Mode aus) ──────────────────
+setInterval(async () => {
+  try {
+    const r = await fetch('/api/lite-request/pending');
+    const d = await r.json();
+    const ov = document.getElementById('liteRequestOverlay');
+    if (d.pending) ov.classList.add('show');
+  } catch(e) {}
+}, 5000);
+
+async function answerLiteRequest(accept) {
+  document.getElementById('liteRequestOverlay').classList.remove('show');
+  try {
+    await fetch('/api/lite-request/answer', {
+      method: 'POST',
+      headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify({accept})
+    });
+    if (accept) {
+      const d = await (await fetch('/api/lite-mode')).json();
+      updateLiteBtn(d.lite_mode);
+    }
+  } catch(e) {}
+}
+
 loadLiteMode();
 
 // ── FRESH START ON LOAD ──────────────────────────────────────────
@@ -4223,6 +4261,41 @@ def admin_kill_process(pid):
         return jsonify(ok=False, error="Zugriff verweigert.")
     except Exception as e:
         return jsonify(ok=False, error=str(e))
+
+_lite_request_pending = False
+_lite_request_lock = threading.Lock()
+
+
+@app.route('/api/lite-request', methods=['POST'])
+def api_lite_request():
+    """Freund beantragt Lite-Mode auszuschalten."""
+    global _lite_request_pending
+    with _lite_request_lock:
+        _lite_request_pending = True
+    return jsonify(ok=True)
+
+
+@app.route('/api/lite-request/pending', methods=['GET'])
+@login_required
+def api_lite_request_pending():
+    with _lite_request_lock:
+        return jsonify(pending=_lite_request_pending)
+
+
+@app.route('/api/lite-request/answer', methods=['POST'])
+@login_required
+def api_lite_request_answer():
+    global _lite_request_pending
+    data = request.get_json(silent=True) or {}
+    with _lite_request_lock:
+        _lite_request_pending = False
+    if data.get('accept'):
+        try:
+            req.post(f"{CORE_URL}/lite-mode", json={'lite_mode': False}, timeout=3)
+        except Exception:
+            return jsonify(ok=False, error='Core nicht erreichbar'), 503
+    return jsonify(ok=True)
+
 
 @app.route('/api/lite-mode', methods=['GET'])
 @login_required
