@@ -824,6 +824,9 @@ def route_speak():
 _gpu_cache = {"load": None, "mem": None}
 _gpu_cache_lock = threading.Lock()
 
+_bmo_busy = False
+_bmo_busy_lock = threading.Lock()
+
 def _refresh_gpu():
     """Hintergrund-Thread: GPU-Info alle 30s via WMI aktualisieren."""
     while True:
@@ -861,7 +864,9 @@ def route_status():
     with _gpu_cache_lock:
         gpu_load = _gpu_cache["load"]
         gpu_mem  = _gpu_cache["mem"]
-    return jsonify(cpu=cpu, ram=ram, time=zeit, gpu=gpu_load, gpu_mem=gpu_mem)
+    with _bmo_busy_lock:
+        busy = _bmo_busy
+    return jsonify(cpu=cpu, ram=ram, time=zeit, gpu=gpu_load, gpu_mem=gpu_mem, busy=busy)
 
 
 @app.route('/jumpscare', methods=['POST'])
