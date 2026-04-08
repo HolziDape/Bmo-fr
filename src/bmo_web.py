@@ -1152,6 +1152,8 @@ HTML = """<!DOCTYPE html>
     margin-bottom: 8px; font-variant-numeric: tabular-nums;
   }
   .pong-info { text-align: center; color: var(--text2); font-size: 13px; margin-top: 8px; }
+  @keyframes pulse-text{0%,100%{opacity:1}50%{opacity:.4}}
+  .bmo-thinking{animation:pulse-text 1.4s ease-in-out infinite;}
 </style>
 </head>
 <body>
@@ -1164,6 +1166,7 @@ HTML = """<!DOCTYPE html>
     <div>
       <h1>BMO</h1>
       <span class="sub" id="coreStatus">Verbinde...</span>
+      <span id="bmoReady" style="font-size:11px;margin-left:4px;"></span>
     </div>
   </header>
 
