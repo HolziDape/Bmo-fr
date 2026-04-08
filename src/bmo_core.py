@@ -741,9 +741,16 @@ def route_process():
     remote = bool(data.get('remote', False))
     if not text:
         return jsonify(response="Ich habe nichts verstanden.", action=None)
-    response, action, action_params = process_text(text, remote=remote)
-    save_conversation(text, response)
-    return jsonify(response=response, action=action, action_params=action_params)
+    global _bmo_busy
+    with _bmo_busy_lock:
+        _bmo_busy = True
+    try:
+        response, action, action_params = process_text(text, remote=remote)
+        save_conversation(text, response)
+        return jsonify(response=response, action=action, action_params=action_params)
+    finally:
+        with _bmo_busy_lock:
+            _bmo_busy = False
 
 
 @app.route('/transcribe', methods=['POST'])
@@ -757,43 +764,50 @@ def route_transcribe():
     if not b64:
         return jsonify(transcript='', response='Kein Audio empfangen.', action=None)
 
-    audio_bytes = base64.b64decode(b64)
-    suffix = '.wav' if fmt == 'wav' else '.webm'
-    with tempfile.NamedTemporaryFile(suffix=suffix, delete=False) as f:
-        f.write(audio_bytes)
-        in_path = f.name
-
-    wav_path = in_path.rsplit('.', 1)[0] + '_conv.wav'
+    global _bmo_busy
+    with _bmo_busy_lock:
+        _bmo_busy = True
     try:
-        subprocess.run(
-            ['ffmpeg', '-y', '-i', in_path, '-ar', '16000', '-ac', '1', wav_path],
-            capture_output=True, timeout=15
-        )
-    except:
-        wav_path = in_path
+        audio_bytes = base64.b64decode(b64)
+        suffix = '.wav' if fmt == 'wav' else '.webm'
+        with tempfile.NamedTemporaryFile(suffix=suffix, delete=False) as f:
+            f.write(audio_bytes)
+            in_path = f.name
 
-    transcript = ''
-    try:
-        wm     = get_whisper()
-        result = wm.transcribe(wav_path, language="de", fp16=False,
-                               temperature=0.0, no_speech_threshold=0.7,
-                               condition_on_previous_text=False)
-        text = result['text'].strip()
-        PHANTOM = {".", "..", "...", "Untertitel", "Untertitelung", "Vielen Dank", ""}
-        transcript = '' if text in PHANTOM else text
-    except Exception as e:
-        log.error(f"Whisper Fehler: {e}")
+        wav_path = in_path.rsplit('.', 1)[0] + '_conv.wav'
+        try:
+            subprocess.run(
+                ['ffmpeg', '-y', '-i', in_path, '-ar', '16000', '-ac', '1', wav_path],
+                capture_output=True, timeout=15
+            )
+        except:
+            wav_path = in_path
 
-    for p in [in_path, wav_path]:
-        try: os.remove(p)
-        except: pass
+        transcript = ''
+        try:
+            wm     = get_whisper()
+            result = wm.transcribe(wav_path, language="de", fp16=False,
+                                   temperature=0.0, no_speech_threshold=0.7,
+                                   condition_on_previous_text=False)
+            text = result['text'].strip()
+            PHANTOM = {".", "..", "...", "Untertitel", "Untertitelung", "Vielen Dank", ""}
+            transcript = '' if text in PHANTOM else text
+        except Exception as e:
+            log.error(f"Whisper Fehler: {e}")
 
-    if not transcript:
-        return jsonify(transcript='', response='Ich habe dich nicht verstanden.', action=None)
+        for p in [in_path, wav_path]:
+            try: os.remove(p)
+            except: pass
 
-    remote = bool(data.get('remote', False))
-    response, action, action_params = process_text(transcript, remote=remote)
-    return jsonify(transcript=transcript, response=response, action=action, action_params=action_params)
+        if not transcript:
+            return jsonify(transcript='', response='Ich habe dich nicht verstanden.', action=None)
+
+        remote = bool(data.get('remote', False))
+        response, action, action_params = process_text(transcript, remote=remote)
+        return jsonify(transcript=transcript, response=response, action=action, action_params=action_params)
+    finally:
+        with _bmo_busy_lock:
+            _bmo_busy = False
 
 
 @app.route('/speak', methods=['POST'])
@@ -823,6 +837,9 @@ def route_speak():
 
 _gpu_cache = {"load": None, "mem": None}
 _gpu_cache_lock = threading.Lock()
+
+_bmo_busy = False
+_bmo_busy_lock = threading.Lock()
 
 def _refresh_gpu():
     """Hintergrund-Thread: GPU-Info alle 30s via WMI aktualisieren."""
@@ -861,7 +878,9 @@ def route_status():
     with _gpu_cache_lock:
         gpu_load = _gpu_cache["load"]
         gpu_mem  = _gpu_cache["mem"]
-    return jsonify(cpu=cpu, ram=ram, time=zeit, gpu=gpu_load, gpu_mem=gpu_mem)
+    with _bmo_busy_lock:
+        busy = _bmo_busy
+    return jsonify(cpu=cpu, ram=ram, time=zeit, gpu=gpu_load, gpu_mem=gpu_mem, busy=busy)
 
 
 @app.route('/jumpscare', methods=['POST'])
