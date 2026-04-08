@@ -741,9 +741,16 @@ def route_process():
     remote = bool(data.get('remote', False))
     if not text:
         return jsonify(response="Ich habe nichts verstanden.", action=None)
-    response, action, action_params = process_text(text, remote=remote)
-    save_conversation(text, response)
-    return jsonify(response=response, action=action, action_params=action_params)
+    global _bmo_busy
+    with _bmo_busy_lock:
+        _bmo_busy = True
+    try:
+        response, action, action_params = process_text(text, remote=remote)
+        save_conversation(text, response)
+        return jsonify(response=response, action=action, action_params=action_params)
+    finally:
+        with _bmo_busy_lock:
+            _bmo_busy = False
 
 
 @app.route('/transcribe', methods=['POST'])
@@ -792,8 +799,15 @@ def route_transcribe():
         return jsonify(transcript='', response='Ich habe dich nicht verstanden.', action=None)
 
     remote = bool(data.get('remote', False))
-    response, action, action_params = process_text(transcript, remote=remote)
-    return jsonify(transcript=transcript, response=response, action=action, action_params=action_params)
+    global _bmo_busy
+    with _bmo_busy_lock:
+        _bmo_busy = True
+    try:
+        response, action, action_params = process_text(transcript, remote=remote)
+        return jsonify(transcript=transcript, response=response, action=action, action_params=action_params)
+    finally:
+        with _bmo_busy_lock:
+            _bmo_busy = False
 
 
 @app.route('/speak', methods=['POST'])
